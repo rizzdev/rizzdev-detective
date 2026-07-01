@@ -6,6 +6,8 @@ import {
   loadQuestions,
   renderPage,
   renderBatchHtml,
+  renderQuestionHtml,
+  replaceQuestionHtml,
   normalizeResults,
   DEMO_QUESTIONS,
 } from '../detective.mjs';
@@ -297,6 +299,53 @@ test('renderBatchHtml wraps a batch with an id, its panels, and a continue butto
 test('renderBatchHtml renders a live findings briefing when present', () => {
   const nq = normalizeQuestions({ findings: { summary: 'ctx' }, questions: [{ id: 'a', text: 't', options: [{ id: 'x', label: 'X' }] }] });
   assert.match(renderBatchHtml(nq, 0), /class="findings"/);
+});
+
+// --- in-place single-question update --------------------------------------
+
+test('renderQuestionHtml renders one .question section for the given id', () => {
+  const html = renderQuestionHtml({ id: 'auth', text: 'Which auth?', options: [{ id: 't', label: 'Token' }] });
+  assert.match(html, /<section class="question" data-qid="auth"/);
+  assert.match(html, /data-qid="auth"[^>]*value="t"/);
+  // exactly one question section — it's a single-question fragment
+  assert.equal((html.match(/class="question"/g) || []).length, 1);
+});
+
+test('renderQuestionHtml forces the id even if the raw question disagrees', () => {
+  const html = renderQuestionHtml({ id: 'ignored', text: 't', options: [{ id: 'x', label: 'X' }] }, 'auth');
+  assert.match(html, /data-qid="auth"/);
+  assert.doesNotMatch(html, /data-qid="ignored"/);
+});
+
+test('replaceQuestionHtml swaps only the targeted question inside a batch, leaving siblings intact', () => {
+  const nq = normalizeQuestions({ sections: [{ title: 'auth', questions: [
+    { id: 'a', text: 'first', options: [{ id: 'x', label: 'X' }, { id: 'y', label: 'Y' }] },
+    { id: 'b', text: 'second', options: [{ id: 'p', label: 'P' }, { id: 'q', label: 'Q' }] },
+  ] }] });
+  const batch = renderBatchHtml(nq, 2);
+  const fresh = renderQuestionHtml({ id: 'b', text: 'second — reworked', options: [{ id: 'p2', label: 'P2' }] });
+  const out = replaceQuestionHtml(batch, 'b', fresh);
+  assert.match(out, /second — reworked/);
+  assert.match(out, /value="p2"/);
+  assert.doesNotMatch(out, /value="q"/); // old option gone
+  assert.match(out, /first/);            // sibling untouched
+  assert.match(out, /value="x"/);        // sibling option untouched
+  assert.match(out, /class="batch" data-batch="2"/); // wrapper preserved
+});
+
+test('replaceQuestionHtml is a no-op when the qid is absent', () => {
+  const nq = normalizeQuestions({ questions: [{ id: 'a', text: 't', options: [{ id: 'x', label: 'X' }] }] });
+  const batch = renderBatchHtml(nq, 0);
+  assert.equal(replaceQuestionHtml(batch, 'nope', '<section></section>'), batch);
+});
+
+test('replaceQuestionHtml handles regex-special characters in the qid', () => {
+  const nq = normalizeQuestions({ questions: [{ id: 'a.b(c)', text: 't', options: [{ id: 'x', label: 'X' }] }] });
+  const batch = renderBatchHtml(nq, 0);
+  const fresh = renderQuestionHtml({ id: 'a.b(c)', text: 'new', options: [{ id: 'z', label: 'Z' }] });
+  const out = replaceQuestionHtml(batch, 'a.b(c)', fresh);
+  assert.match(out, /new/);
+  assert.match(out, /value="z"/);
 });
 
 // --- results --------------------------------------------------------------

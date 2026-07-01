@@ -377,6 +377,23 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 .qactions button:hover{border-color:var(--blu);color:var(--blu)}
 .question.delegated>h3::after{content:" · delegated to claude ✓";color:var(--grn2);font-weight:600;font-size:var(--fs-micro)}
 .question.awaiting{opacity:.55}
+
+/* a single question locked while claude reworks it (in place, no reload) */
+.question.working{box-shadow:inset 2px 0 0 var(--amb)}
+.question.working>h3::after{content:" · reworking…";color:var(--amb);font-weight:600;font-size:var(--fs-micro)}
+.question.working .option,.question.working .pill,.question.working .rankrow{cursor:default;opacity:.7}
+.question.working .qactions{opacity:.35;pointer-events:none}
+.qworking{display:flex;align-items:center;gap:7px;margin:8px 0 0 var(--indent);color:var(--amb);font-size:var(--fs-micro);font-weight:600}
+.qworking .dotp{width:7px;height:7px;border-radius:50%;background:var(--amb);box-shadow:0 0 8px var(--amb);animation:pulse 1s ease-in-out infinite}
+.qflash{animation:qflash 1.1s ease-out}
+@keyframes qflash{0%{background:rgba(126,231,135,.10)}100%{background:transparent}}
+
+/* toasts */
+#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:40}
+.toast{background:#0d1219;border:1px solid var(--panel);border-left:3px solid var(--blu);color:var(--tx1);padding:9px 13px;font-size:var(--fs-micro);line-height:1.4;box-shadow:0 12px 34px rgba(0,0,0,.55);opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;max-width:320px}
+.toast.show{opacity:1;transform:none}
+.toast.good{border-left-color:var(--grn)}
+.toast.warn{border-left-color:var(--amb)}
 `;
 
 // Shared client script: drag-to-reorder for every .rank list (idempotent).
@@ -499,6 +516,28 @@ export function renderBatchHtml(nq, id) {
   return `<div class="batch" data-batch="${id}">${heading}${inner}<div class="cont"><button type="button" onclick="sendBatch(${id})">continue →</button></div></div>`;
 }
 
+// Render a single question fragment (one `.question` section) for in-place
+// replacement in a live batch. `id` forces the question id so a rework can't
+// accidentally re-key the question; falls back to the raw question's own id.
+export function renderQuestionHtml(rawQuestion, id) {
+  const q = { ...rawQuestion, id: id != null ? id : rawQuestion && rawQuestion.id };
+  const nq = normalizeQuestions({ questions: [q] });
+  return renderQuestion(nq.sections[0].questions[0]);
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Swap the single `.question` section matching `qid` inside a rendered batch
+// with `newHtml`, leaving every sibling question (and the batch wrapper)
+// untouched. No-op if the qid isn't present. A `.question` never nests another
+// `<section>`, so the non-greedy match to the first `</section>` is safe.
+export function replaceQuestionHtml(batchHtml, qid, newHtml) {
+  const re = new RegExp('<section class="question" data-qid="' + escapeRegExp(esc(qid)) + '"[\\s\\S]*?</section>');
+  return re.test(batchHtml) ? batchHtml.replace(re, newHtml) : batchHtml;
+}
+
 function renderLiveShell() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -515,8 +554,15 @@ function renderLiveShell() {
     ${NAV_HTML}
   </div>
 </div>
+<div id="toasts"></div>
 <script>
 const feed=document.getElementById('feed');
+function showToast(msg,kind){
+  const wrap=document.getElementById('toasts');if(!wrap)return;
+  const el=document.createElement('div');el.className='toast'+(kind?' '+kind:'');el.textContent=msg;wrap.appendChild(el);
+  requestAnimationFrame(function(){el.classList.add('show');});
+  setTimeout(function(){el.classList.remove('show');setTimeout(function(){el.remove();},240);},3200);
+}
 const statusEl=document.getElementById('status'),stext=document.getElementById('stext');
 function setStatus(k,t){statusEl.className='statusline'+(k?' '+k:'');stext.textContent=t;}
 function collect(id){
@@ -547,14 +593,28 @@ function addActions(scope){
     q.appendChild(bar);
   });
 }
+function lockQuestion(q,on){
+  q.classList.toggle('working',on);
+  q.querySelectorAll('input,textarea').forEach(function(i){i.disabled=on;});
+  var badge=q.querySelector('.qworking');
+  if(on){
+    if(!badge){badge=document.createElement('div');badge.className='qworking';badge.innerHTML='<span class="dotp"></span>claude is reworking this question…';
+      var acts=q.querySelector('.qactions');if(acts)q.insertBefore(badge,acts);else q.appendChild(badge);}
+  }else if(badge){badge.remove();}
+}
 function doAction(q,kind){
   if(!q)return;
-  if(kind==='decide'){const rec=q.dataset.rec;if(rec){const inp=q.querySelector('input[value="'+rec+'"]');if(inp)inp.checked=true;}q.classList.add('delegated');return;}
+  if(kind==='decide'){const rec=q.dataset.rec;if(rec){const inp=q.querySelector('input[value="'+rec+'"]');if(inp)inp.checked=true;}q.classList.add('delegated');showToast('delegated to claude ✓','good');return;}
+  if(q.classList.contains('working'))return; // already being reworked
   const otherEl=q.querySelector('.other');
   const other=otherEl?otherEl.value.trim():'';
   let note='';
   if(kind==='rethink'){note=(prompt("What's off? What should I aim for instead?", other)||'').trim();}
-  q.classList.add('awaiting');setStatus('think','claude is thinking…');
+  // Lock down just THIS question — the rest of the page keeps every answer.
+  lockQuestion(q,true);
+  const label={rethink:'rethinking this',research:'researching this',more:'finding more options'}[kind]||'reworking this';
+  showToast('sent to claude — '+label,'');
+  setStatus('think','claude is reworking a question…');
   post('/signal',{batch:batchOf(q),qid:q.dataset.qid,kind:kind,note:note,other:other});
 }
 window.qaction=function(kind,q){doAction(q||(document.querySelector('.kfocus')&&document.querySelector('.kfocus').closest('.question')),kind);};
@@ -602,6 +662,19 @@ async function endInterview(){setStatus('think','wrapping up…');await post('/e
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
 es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');window.scrollTo(0,1e9);});
+es.addEventListener('qupdate',function(e){
+  const d=JSON.parse(e.data);
+  const old=feed.querySelector('.question[data-qid="'+d.qid+'"]');
+  if(!old)return; // nothing to replace (stale event)
+  const batch=old.closest('.batch');
+  old.insertAdjacentHTML('afterend',d.html);
+  old.remove();
+  const fresh=feed.querySelector('.question[data-qid="'+d.qid+'"]');
+  if(batch){initRank(batch);addActions(batch);}
+  if(fresh){fresh.classList.add('qflash');fresh.scrollIntoView({block:'nearest'});}
+  showToast('question updated ✓','good');
+  setStatus('','your move');
+});
 es.addEventListener('status',function(e){const d=JSON.parse(e.data);setStatus(d.kind||'',d.text||'');});
 es.addEventListener('retract',function(e){const d=JSON.parse(e.data);feed.querySelectorAll('.batch').forEach(function(el){if(Number(el.dataset.batch)>d.from)el.remove();});setStatus('think','claude is thinking…');});
 es.addEventListener('finish',function(e){es.close();const eb=document.querySelector('.endbar');if(eb)eb.remove();setStatus('done','interview complete — you can close this tab.');});
@@ -772,6 +845,26 @@ export function serveLive(opts = {}) {
         });
         return;
       }
+      if (req.method === 'POST' && p === '/ctl/update') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          const qid = typeof d.qid === 'string' && d.qid ? d.qid : null;
+          const rawQ = d.question && typeof d.question === 'object' ? d.question : null;
+          if (!qid || !rawQ) { json(400, { error: 'update needs { "qid": "...", "question": { ... } }' }); return; }
+          const batch = state.batches.find((b) => (b.qids || []).includes(qid));
+          if (!batch) { json(404, { error: `no live question with id "${qid}" (already retracted, or never pushed)` }); return; }
+          let html;
+          try { html = renderQuestionHtml(rawQ, qid); } catch (e) { json(400, { error: String(e && e.message || e) }); return; }
+          // Keep the stored batch HTML in sync so a reloaded/late tab shows the update too.
+          batch.html = replaceQuestionHtml(batch.html, qid, html);
+          // Options may have changed ids — drop the stale answer so the user re-picks.
+          delete state.answers[qid];
+          broadcast('qupdate', { qid, html });
+          broadcast('status', { kind: '', text: 'your move' });
+          json(200, { ok: true, qid });
+        });
+        return;
+      }
       if (req.method === 'POST' && p === '/ctl/retract') {
         readBody(req).then((body) => {
           let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
@@ -840,9 +933,11 @@ const SESSION_DEFAULT = `${tmpdir()}/rizzdev-detective-live.json`;
 const USAGE = `usage:
   detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit)
   detective.mjs --demo                                    open a built-in sample interview
+  detective.mjs <questions.json> --once                   standalone: self-finish on submit (no agent driving)
   detective.mjs --static <questions.json>                 legacy static one-page form (fallback)
   detective.mjs --live [--port N] [--out <file>]          start a persistent live server (adaptive)
   detective.mjs push <batch.json> [--port N]              push a question batch into the live server
+  detective.mjs update <update.json> [--port N]           replace ONE question in place ({qid, question})
   detective.mjs wait [--timeout SEC] [--port N]           block until the user answers a batch
   detective.mjs retract --from <batchId> [--port N]       drop batches after a revised answer
   detective.mjs finish [--out <file>] [--port N]          end the interview, print the transcript
@@ -865,6 +960,11 @@ async function runControl(cmd, args) {
     const file = positional[1];
     if (!file) { console.error('usage: detective.mjs push <batch.json>'); process.exit(2); }
     const r = await fetch(`${base}/ctl/push`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: readFileSync(file, 'utf8') });
+    process.stdout.write((await r.text()) + '\n'); process.exit(r.ok ? 0 : 1);
+  } else if (cmd === 'update') {
+    const file = positional[1];
+    if (!file) { console.error('usage: detective.mjs update <update.json>   (file: {"qid":"...","question":{...}})'); process.exit(2); }
+    const r = await fetch(`${base}/ctl/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: readFileSync(file, 'utf8') });
     process.stdout.write((await r.text()) + '\n'); process.exit(r.ok ? 0 : 1);
   } else if (cmd === 'wait') {
     const t = argFlag(args, 'timeout') || '1800';
@@ -904,20 +1004,24 @@ async function runLiveServer(args) {
   process.exit(0);
 }
 
-// The default path: the unified live experience as ONE blocking command.
-// Starts the live server in-process, pushes the whole batch, waits for the user
-// to submit, then finishes + prints the transcript. If they hit a pushback
-// action instead, returns { pending: <signal> } so the caller can rework and
-// re-run. (Multi-round adaptive interviews use --live + push/wait/finish.)
+// The default path: a persistent live interview seeded with the first batch.
+// Starts the live server in-process, writes the session file (so the `wait` /
+// `update` / `push` / `finish` control commands can find it), pushes the batch,
+// then BLOCKS until `finish`. Per-question pushback actions (rethink/research/
+// more) no longer tear the page down — the server stays up so the caller can
+// rework a single question in place with `update` and keep the user's progress.
+// Run this in the background and drive it with the control sub-commands.
 async function runInterview(rawJson, args) {
+  const sp = argFlag(args, 'session') || SESSION_DEFAULT;
   const outPath = argFlag(args, 'out');
   let base = null;
   const done = serveLive({
     port: Number(argFlag(args, 'port') || 8788),
     onListen: (url, port) => {
       base = `http://127.0.0.1:${port}`;
+      try { writeFileSync(sp, JSON.stringify({ port, url, pid: process.pid })); } catch {}
       console.error(`\nrizzdev-detective ready → ${url}`);
-      console.error('Waiting for you to submit your answers…\n');
+      console.error('drive it:  wait  ·  update <file>  ·  push <file>  ·  finish\n');
       openBrowser(url);
     },
   });
@@ -933,18 +1037,30 @@ async function runInterview(rawJson, args) {
     process.exit(1);
   }
 
-  const wait = await (await fetch(`${base}/ctl/wait?timeout=${argFlag(args, 'timeout') || 1800}`)).json();
-  const signal = (wait.events || []).find((e) => e.type === 'signal');
-  let output;
-  if (signal) {
-    output = { pending: signal };
-    await fetch(`${base}/ctl/finish`, { method: 'POST', body: '{}' }).catch(() => {});
-  } else {
-    output = await (await fetch(`${base}/ctl/finish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+  // Standalone/showcase (`--demo`/`--once`): no agent is driving the session, so
+  // self-finish on the first terminal action — otherwise the process would block
+  // forever waiting for a `finish` that never comes. (Live pushback actions can't
+  // be reworked without a driver, so they just come back as a pending signal.)
+  if (args.includes('--once') || args.includes('--demo')) {
+    const wait = await (await fetch(`${base}/ctl/wait?timeout=${argFlag(args, 'timeout') || 1800}`)).json();
+    const signal = (wait.events || []).find((e) => e.type === 'signal');
+    let output;
+    if (signal) {
+      output = { pending: signal };
+      await fetch(`${base}/ctl/finish`, { method: 'POST', body: '{}' }).catch(() => {});
+    } else {
+      output = await (await fetch(`${base}/ctl/finish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    }
+    await done.catch(() => {});
+    if (outPath) writeFileSync(outPath, JSON.stringify(output, null, 2));
+    process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+    process.exit(0);
   }
-  await done.catch(() => {});
-  if (outPath) writeFileSync(outPath, JSON.stringify(output, null, 2));
-  process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+
+  // Default (agent-driven): stay alive until the caller runs `finish`.
+  const transcript = await done;
+  if (outPath) writeFileSync(outPath, JSON.stringify(transcript, null, 2));
+  process.stdout.write(JSON.stringify(transcript, null, 2) + '\n');
   process.exit(0);
 }
 
@@ -1062,7 +1178,7 @@ async function main() {
   const args = process.argv.slice(2);
   const cmd = args.filter((a) => !a.startsWith('--'))[0];
   if (args.includes('--live')) return runLiveServer(args);
-  if (['push', 'wait', 'retract', 'finish', 'state'].includes(cmd)) return runControl(cmd, args);
+  if (['push', 'update', 'wait', 'retract', 'finish', 'state'].includes(cmd)) return runControl(cmd, args);
   if (args.includes('--static')) return runOneShot(args); // hidden fallback: legacy static one-page form
   return runDefault(args); // default: unified live interview (one blocking command)
 }

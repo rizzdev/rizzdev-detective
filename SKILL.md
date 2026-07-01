@@ -97,87 +97,111 @@ Then surface what you learned in the form:
      clickable, non-URL `ref`s render as tagged code refs. Omit it if research
      turned up nothing notable. See "Research first" above.
 
-2. **Run it** (one blocking command — opens the live UI, blocks until submit):
+2. **Start the interview in the background.** It's a persistent live server: it
+   prints the URL to stderr, opens the browser, shows your first batch, and
+   **does not return until you `finish`** — so run it in the background and drive
+   it with the control sub-commands below.
 
    ```bash
-   node ~/.claude/skills/rizzdev-detective/detective.mjs <questions.json> --out <results.json>
+   node ~/.claude/skills/rizzdev-detective/detective.mjs <questions.json> --out <results.json> &
    ```
 
-   This is the unified live experience: it prints the local URL to stderr, opens
-   the browser, and returns once the user submits — printing JSON to stdout.
-   (There's a legacy static one-page form behind `--static` if ever needed.)
+   (There's a legacy static one-page form behind `--static` if you ever want a
+   plain non-interactive form with no live actions.)
 
-3. **Read the result** and continue. Two possible shapes:
+3. **Drive it** with control sub-commands (each a short, separate call):
 
-   **They submitted** → the transcript:
-
-   ```json
-   {
-     "answers": { "auth": { "selected": ["token"], "other": "" } },
-     "globalNote": "any overall notes",
-     "submittedAt": "2026-07-01T13:05:00.000Z"
-   }
-   ```
-
-   `answers` is keyed by question `id`; `selected` holds chosen option ids
-   (0–1 for single/yesno, 0–n for multi, full order for rank); `other` is the
-   per-question free-text box; `answers[id].delegated` is `true` if they hit
-   "you decide". Unanswered questions come back with empty `selected`.
-
-   **They hit a pushback action** (rethink / research / more) → a pending signal:
-
-   ```json
-   { "pending": { "type": "signal", "qid": "auth", "kind": "research",
-                  "note": "...", "other": "text they typed in Other" } }
-   ```
-
-   Rework that question accordingly (for `research`, do a `--deep`/`--online`
-   pass; honor `note` + `other`) and **re-run the command** with the improved
-   questions. For a genuinely branching, many-round interview in a *single* tab,
-   use **live mode** instead (below).
-
-## Live mode (`--live`) — adaptive interviews
-
-For a decision tree that branches on the user's answers, run a **live interview**:
-push a batch, wait for the answers, then push the *next* questions based on what
-they said — all in one open browser tab.
-
-1. **Start the persistent server in the background** (it does not exit until you
-   `finish`), then read the URL and share it:
-
-   ```bash
-   node ~/.claude/skills/rizzdev-detective/detective.mjs --live --out <transcript.json>
-   ```
-
-2. **Drive it** with control sub-commands (each a short, separate call):
-
-   - `push <batch.json>` — inject a question batch (same schema as one-shot; may
-     include `title`/`findings`). It animates into the page. Batch independent
-     knobs together; keep question `id`s unique across the whole interview.
    - `wait [--timeout SEC]` — **run this in the background**; it blocks until the
-     user acts, then prints the events. React to each:
-     - `{type:"answer", batch, answers, revised?}` — they submitted a batch. If
-       `revised:true`, they changed an earlier answer → `retract --from <batchId>`
-       to drop the now-stale later batches, then push a fresh branch.
-     - `{type:"signal", batch, qid, kind, note, other}` — a pushback action:
-       `rethink` (repush bolder/different options; honor `note`), `research` (do
-       a deep + online pass scoped to that question, then repush with updated
-       findings/options), `more` (append options). `other` carries whatever the
-       user had typed in that question's "Other" box when they hit the button —
-       always read it; they may have used it to hand you information.
-     - `{type:"ended"}` — the user hit "end interview" → `finish`.
-   - `retract --from <batchId>` — drop every batch after `batchId` (and their
-     answers). Use after a revised upstream answer, or a `rethink`/`research`.
+     user acts, then prints the events. React to each (see below), then `wait`
+     again. Loop until they submit / end.
+   - `update <update.json>` — **replace ONE question in place** (see "live
+     actions"). The rest of the page — every other answer in progress — is kept.
+   - `push <batch.json>` — append a *new* question batch (same schema; may include
+     `title`/`findings`). Use for adaptive follow-ups that branch on their
+     answers. Keep question `id`s unique across the whole interview.
+   - `retract --from <batchId>` — drop every batch *after* `batchId` (and their
+     answers). Use only when an earlier answer changed and later batches are now
+     stale — **not** for reworking a single question (use `update` for that).
    - `finish [--out <file>]` — end the interview; prints the full transcript and
      shuts the server down.
 
-3. **The loop:** push → (background) wait → react (push / retract) → wait → …
-   → finish. Tell the user you're researching/thinking between pushes.
+   **Events from `wait`:**
+   - `{type:"answer", batch, answers, revised?}` — they submitted a batch. If
+     `revised:true`, an earlier answer changed → `retract --from <batchId>` to
+     drop now-stale later batches, then push a fresh branch. Otherwise push the
+     next batch (if adaptive) or `finish` if you have what you need.
+   - `{type:"signal", batch, qid, kind, note, other}` — a **live action** on one
+     question (see next section). That single question is now locked/greyed in
+     the UI showing "claude is reworking this…". Rework it and `update` it in
+     place; the user keeps everything else they've filled in.
+   - `{type:"ended"}` — they hit "end interview" → `finish`.
 
-Use live mode when questions branch; use the plain one-shot form when they don't.
+4. **The loop:** (background) wait → react (`update` a question / `push` a batch /
+   `retract`) → wait → … → `finish`. Tell the user you're researching/thinking
+   between reactions.
+
+## Live actions — reworking ONE question in place
+
+Each question shows a small action bar: `↳ you decide` · `↻ rethink` · `⌕ research`
+· `＋ more`. `you decide` is handled entirely in the page (picks your rec, marks
+it delegated). The other three send you a `signal` and **lock just that one
+question** while you rework it — the whole page and all other answers stay put.
+
+Respond by writing a small update file and running `update`:
+
+```json
+{ "qid": "auth", "question": {
+    "text": "Which auth model for v1?",
+    "type": "single",
+    "recommendation": { "optionId": "oauth", "why": "…now that you flagged X" },
+    "options": [ { "id": "oauth", "label": "OAuth", "pro": "…", "con": "…" } ],
+    "allowOther": true
+} }
+```
+
+```bash
+node ~/.claude/skills/rizzdev-detective/detective.mjs update <update.json>
+```
+
+The `question` uses the same schema as any question; its `id` is forced to `qid`
+(you can omit it). The question swaps in place, unlocks, flashes, and a toast
+confirms it. **The old answer for that question is cleared** (its options may have
+changed) — everything else is untouched.
+
+Handle each `kind`:
+- **`rethink`** — repush bolder / genuinely different options; honor `note` (what
+  they said is off).
+- **`research`** — do a `--deep` + `--online` pass scoped to that one question,
+  then update it with sharper options and reasoning.
+- **`more`** — append additional options (keep the existing ones).
+
+Always read `other`: it carries whatever the user had typed in that question's
+"Other" box when they hit the button — they may have used it to hand you info.
+
+## Reading the transcript
+
+`finish` (and the backgrounded run's `--out`) gives you:
+
+```json
+{
+  "answers": { "auth": { "selected": ["token"], "other": "" } },
+  "globalNote": "any overall notes",
+  "submittedAt": "2026-07-01T13:05:00.000Z"
+}
+```
+
+`answers` is keyed by question `id`; `selected` holds chosen option ids (0–1 for
+single/yesno, 0–n for multi, full order for rank); `other` is the per-question
+free-text box; `answers[id].delegated` is `true` if they hit "you decide".
+Unanswered questions come back with empty `selected`.
 
 ## Notes
 
 - Zero dependencies; needs Node 22+. Localhost only.
-- One-shot run = one interview. Live mode = one persistent session; `finish` ends it.
+- One run = one persistent interview session; `finish` ends it and shuts down the
+  server. The control commands find that session automatically (via a session
+  file), or pass `--port N` to target a specific one.
+- Live actions (`rethink`/`research`/`more`) rework a single question in place —
+  they never reload the page or discard the user's other answers. Reserve
+  `retract` for genuinely stale downstream batches after a changed answer.
 - If the browser doesn't auto-open, share the printed URL with the user.
