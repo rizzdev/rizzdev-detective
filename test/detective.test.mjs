@@ -250,6 +250,23 @@ test('renderPage renders a rank list with draggable rows', () => {
   assert.match(html, /class="rankrow" draggable="true" data-oid="a"/);
 });
 
+test('normalizeQuestions carries priority only on rank questions', () => {
+  const n = normalizeQuestions({ questions: [
+    { id: 'r', text: 't', type: 'rank', priority: true, options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+    { id: 's', text: 't2', options: [{ id: 'x', label: 'X' }] },
+  ] });
+  assert.equal(n.sections[0].questions[0].priority, true);
+  assert.equal(n.sections[0].questions[1].priority, undefined);
+});
+
+test('renderPage marks a priority rank list and gives sections an accent color', () => {
+  const html = renderPage(normalizeQuestions({ sections: [{ title: 'p', questions: [
+    { id: 'r', text: 't', type: 'rank', priority: true, options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+  ] }] }));
+  assert.match(html, /class="rank rank-prio"/);
+  assert.match(html, /class="section" style="--sc:#[0-9a-f]{6}"/);
+});
+
 test('normalizeResults preserves rank order as the full selected array', () => {
   const nq = normalizeQuestions({ questions: [{ id: 'r', text: 'o', type: 'rank',
     options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }] }] });

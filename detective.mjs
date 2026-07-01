@@ -72,6 +72,8 @@ export function normalizeQuestions(doc) {
           ? { optionId: q.recommendation.optionId, why: q.recommendation.why }
           : undefined,
         options,
+        // rank-only: colour positions by severity/goodness gradient.
+        priority: isRank ? q.priority === true : undefined,
         // Other box is off by default for yesno/rank, on by default otherwise.
         allowOther: isYesNo || isRank ? q.allowOther === true : q.allowOther !== false,
       };
@@ -181,7 +183,8 @@ function renderPill(q, o) {
 }
 
 function renderRankItems(q) {
-  return `<ol class="rank" data-qid="${esc(q.id)}">${q.options.map((o) =>
+  const cls = q.priority ? 'rank rank-prio' : 'rank';
+  return `<ol class="${cls}" data-qid="${esc(q.id)}">${q.options.map((o) =>
     `<li class="rankrow" draggable="true" data-oid="${esc(o.id)}"><span class="grip">⠿</span><span class="rlabel">${esc(o.label)}</span>${o.pro ? `<span class="rpro">${fmt(o.pro)}</span>` : ''}</li>`,
   ).join('')}</ol>`;
 }
@@ -211,15 +214,25 @@ function renderQuestion(q) {
     </section>`;
 }
 
-function renderSection(sec) {
+// Each section gets a random vibrant accent (legend + a thin left bar), fresh
+// per render — a light touch, not a screen fill.
+const SECTION_COLORS = ['#6cb6ff', '#a78bfa', '#f472b6', '#5eead4', '#fbbf24', '#f97316', '#a3e635', '#22d3ee', '#fb7185', '#c084fc', '#38bdf8', '#e879f9'];
+function sectionColors(n) {
+  const p = SECTION_COLORS.slice();
+  for (let i = p.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+  return Array.from({ length: n }, (_, i) => p[i % p.length]);
+}
+
+function renderSection(sec, color) {
   const heading = sec.title ? `<h2 class="section-title">${esc(sec.title)}</h2>` : '';
-  return `<div class="section">${heading}${sec.questions.map(renderQuestion).join('')}</div>`;
+  const style = color ? ` style="--sc:${color}"` : '';
+  return `<div class="section"${style}>${heading}${sec.questions.map(renderQuestion).join('')}</div>`;
 }
 
 const STYLES = `
 :root{color-scheme:dark;
 --fs-h1:16px;--fs-h3:15px;--fs-body:13px;--fs-meta:12.5px;--fs-micro:11.5px;
---tx1:#e9edf4;--tx2:#a7b0c0;--tx3:#828da0;--tx4:#5b6577;--tx5:#3d4757;
+--tx1:#c6cedb;--tx2:#a7b0c0;--tx3:#828da0;--tx4:#5b6577;--tx5:#3d4757;
 --grn:#7ee787;--grn2:#8fd694;--blu:#6cb6ff;--amb:#e2b86b;--red:#e58f8f;
 --panel:#26324a;--line:#141b29;--indent:18px}
 *{box-sizing:border-box}
@@ -241,12 +254,12 @@ body{margin:0;background:#05070b;color:var(--tx2);font:var(--fs-body)/1.4 "JetBr
 .prompt .sym{color:var(--blu)}
 .cursor{display:inline-block;width:7px;height:14px;background:var(--grn);margin-left:5px;vertical-align:-2px;animation:blink 1.1s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
-h1{font-size:var(--fs-h1);color:var(--tx1);margin:22px 0 6px;font-weight:700;line-height:1.35}
+h1{font-size:var(--fs-h1);color:var(--tx1);margin:2px 0 8px;font-weight:700;line-height:1.35}
 h1::before{content:"» ";color:var(--tx4)}
 
 /* section = TUI panel with a legend on its top border */
-.section{position:relative;border:1px solid var(--panel);padding:16px 14px 14px;margin:18px 0 0}
-.section-title{position:absolute;top:-8px;left:12px;margin:0;padding:0 7px;background:#0b0e14;color:var(--grn);font-size:var(--fs-micro);letter-spacing:.14em;text-transform:lowercase;font-weight:700;border:0}
+.section{position:relative;border:1px solid var(--panel);padding:16px 14px 14px;margin:18px 0 0;box-shadow:inset 2px 0 0 var(--sc,transparent)}
+.section-title{position:absolute;top:-8px;left:12px;margin:0;padding:0 7px;background:#0b0e14;color:var(--sc,var(--tx2));font-size:var(--fs-micro);letter-spacing:.14em;text-transform:lowercase;font-weight:700;border:0}
 
 /* research briefing panel (blue, to distinguish from question panels) */
 .findings{position:relative;border:1px solid #24344e;padding:16px 14px 14px;margin:18px 0 0;background:rgba(108,182,255,.03)}
@@ -276,7 +289,7 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .option input{position:absolute;opacity:0;pointer-events:none}
 .option::before{position:absolute;left:8px;top:1px;color:#616c82}
 .option:has(input[type=radio])::before{content:"( )"}
-.option:has(input[type=radio]:checked)::before{content:"(◉)";color:var(--grn)}
+.option:has(input[type=radio]:checked)::before{content:"(•)";color:var(--grn);font-weight:700}
 .option:has(input[type=checkbox])::before{content:"[ ]"}
 .option:has(input[type=checkbox]:checked)::before{content:"[×]";color:var(--grn)}
 .option:hover{background:#121826;color:var(--tx1)}
@@ -298,6 +311,9 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .rankrow .rlabel{font-weight:500;color:var(--tx1)}
 .rankrow .rpro{color:var(--tx4);font-size:var(--fs-micro);margin-left:auto}
 .rankrow.grabbed{background:#15120a;box-shadow:inset 2px 0 0 var(--amb)}
+/* priority ranking: colored severity/goodness indicator per position */
+.rank-prio .rankrow::before{color:var(--pc,var(--blu))}
+.rank-prio .rankrow .grip{color:var(--pc,var(--tx5))}
 
 .pills{display:flex;gap:8px;flex-wrap:wrap;padding-left:var(--indent);margin-top:2px}
 .pill{position:relative;display:inline-flex;align-items:center;border:1px solid #2a3346;padding:2px 12px;cursor:pointer;font-weight:600;color:#7d8799}
@@ -313,7 +329,7 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 
 /* global note = its own panel */
 .global{position:relative;border:1px solid var(--panel);padding:16px 14px 14px;margin:18px 0 0}
-.global h3{position:absolute;top:-8px;left:12px;margin:0;padding:0 7px;background:#0b0e14;color:var(--grn);font-size:var(--fs-micro);letter-spacing:.14em;text-transform:lowercase;font-weight:700}
+.global h3{position:absolute;top:-8px;left:12px;margin:0;padding:0 7px;background:#0b0e14;color:var(--tx3);font-size:var(--fs-micro);letter-spacing:.14em;text-transform:lowercase;font-weight:700}
 textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:var(--tx2);padding:8px 10px;font:inherit;font-size:var(--fs-meta);min-height:52px;resize:vertical}
 
 .bar{display:flex;justify-content:flex-end;padding:16px 0 2px}
@@ -365,13 +381,20 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 
 // Shared client script: drag-to-reorder for every .rank list (idempotent).
 const RANK_JS = `
+function paintPrio(list){
+  if(!list.classList.contains('rank-prio'))return;
+  var rows=[].slice.call(list.querySelectorAll('.rankrow')),n=rows.length;
+  rows.forEach(function(r,i){var t=n<2?0:i/(n-1);var h=Math.round(120-120*t);r.style.setProperty('--pc','hsl('+h+',72%,62%)');});
+}
+window.paintRank=paintPrio;
 function initRank(root){
   root.querySelectorAll('.rank').forEach(function(list){
     if(list.dataset.rankInit)return; list.dataset.rankInit='1';
+    paintPrio(list);
     list.querySelectorAll('.rankrow').forEach(function(row){
       row.addEventListener('dragstart',function(e){window.__drag=row;row.classList.add('drag');if(e.dataTransfer)e.dataTransfer.effectAllowed='move';});
       row.addEventListener('dragend',function(){row.classList.remove('drag');window.__drag=null;});
-      row.addEventListener('dragover',function(e){e.preventDefault();var d=window.__drag;if(!d||d===row||d.parentNode!==list)return;var r=row.getBoundingClientRect();var after=(e.clientY-r.top)/r.height>0.5;list.insertBefore(d,after?row.nextSibling:row);});
+      row.addEventListener('dragover',function(e){e.preventDefault();var d=window.__drag;if(!d||d===row||d.parentNode!==list)return;var r=row.getBoundingClientRect();var after=(e.clientY-r.top)/r.height>0.5;list.insertBefore(d,after?row.nextSibling:row);paintPrio(list);});
     });
   });
 }`;
@@ -388,7 +411,7 @@ const NAV_JS = `
   function cur(){return document.querySelector('.kfocus');}
   function setFocus(el){var c=cur();if(c)c.classList.remove('kfocus');if(el){el.classList.add('kfocus');el.scrollIntoView({block:'nearest'});}}
   function move(dir){
-    if(grabbed){var lst=grabbed.parentNode,rows=[].slice.call(lst.querySelectorAll('.rankrow')),i=rows.indexOf(grabbed),j=i+dir;if(j<0||j>=rows.length)return;if(dir>0)lst.insertBefore(grabbed,rows[j].nextSibling);else lst.insertBefore(grabbed,rows[j]);grabbed.scrollIntoView({block:'nearest'});return;}
+    if(grabbed){var lst=grabbed.parentNode,rows=[].slice.call(lst.querySelectorAll('.rankrow')),i=rows.indexOf(grabbed),j=i+dir;if(j<0||j>=rows.length)return;if(dir>0)lst.insertBefore(grabbed,rows[j].nextSibling);else lst.insertBefore(grabbed,rows[j]);if(window.paintRank)window.paintRank(lst);grabbed.scrollIntoView({block:'nearest'});return;}
     var list=foci();if(!list.length)return;var i=list.indexOf(cur());var n=i<0?0:Math.min(list.length-1,Math.max(0,i+dir));setFocus(list[n]);
   }
   function activate(){var c=cur();if(!c)return;if(c.classList.contains('rankrow')){if(grabbed===c){grabbed.classList.remove('grabbed');grabbed=null;}else{grabbed=c;c.classList.add('grabbed');}return;}var inp=c.querySelector('input');if(inp)inp.click();else c.click();}
@@ -414,7 +437,8 @@ const NAV_JS = `
 
 export function renderPage(questions) {
   const title = questions.title ? esc(questions.title) : 'rizzdev-detective';
-  const body = renderFindings(questions.findings) + questions.sections.map(renderSection).join('');
+  const cols = sectionColors(questions.sections.length);
+  const body = renderFindings(questions.findings) + questions.sections.map((s, i) => renderSection(s, cols[i])).join('');
   const dataIsland = JSON.stringify(questions).replace(/</g, '\\u003c');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -425,7 +449,6 @@ export function renderPage(questions) {
 <div class="wrap">
   <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">rizzdev@detective: ./detective</span></div>
   <div class="screen">
-    <div class="prompt"><span class="sym">$</span> ./detective --interview<span class="cursor"></span></div>
     <h1>${title}</h1>
     ${body}
     <div class="global">
@@ -471,7 +494,8 @@ document.getElementById('submit').addEventListener('click', async () => {
 // block with its own "continue" button.
 export function renderBatchHtml(nq, id) {
   const heading = nq.title ? `<h1>${esc(nq.title)}</h1>` : '';
-  const inner = renderFindings(nq.findings) + nq.sections.map(renderSection).join('');
+  const cols = sectionColors(nq.sections.length);
+  const inner = renderFindings(nq.findings) + nq.sections.map((s, i) => renderSection(s, cols[i])).join('');
   return `<div class="batch" data-batch="${id}">${heading}${inner}<div class="cont"><button type="button" onclick="sendBatch(${id})">continue →</button></div></div>`;
 }
 
@@ -485,7 +509,6 @@ function renderLiveShell() {
 <div class="wrap">
   <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">rizzdev@detective: ./detective --live</span></div>
   <div class="screen">
-    <div class="prompt"><span class="sym">$</span> ./detective --live<span class="cursor"></span></div>
     <div id="feed"></div>
     <div class="statusline" id="status"><span class="dotp"></span><span id="stext">connecting…</span></div>
     <div class="endbar"><button type="button" onclick="decideRest()">decide the rest →</button><button type="button" onclick="endInterview()">end interview</button></div>
