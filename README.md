@@ -16,7 +16,11 @@
 
 <br/>
 
-<img src="assets/preview.svg" alt="rizzdev-detective form preview" width="720"/>
+<video src="https://github.com/rizzdev/rizzdev-detective/raw/main/assets/demo.mp4" controls muted autoplay loop playsinline width="720">
+  <img src="assets/preview.svg" alt="rizzdev-detective demo" width="720"/>
+</video>
+
+<sub><a href="https://github.com/rizzdev/rizzdev-detective/raw/main/assets/demo.mp4">▶ watch the demo</a> · or run <code>npx github:rizzdev/rizzdev-detective --demo</code></sub>
 
 </div>
 
