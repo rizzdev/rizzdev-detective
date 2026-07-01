@@ -38,10 +38,12 @@ No account, no cloud, no dependencies. One file of Node, localhost only.
 | ⚖️ **Trade‑offs on every option** | Each choice can show a 👍 **pro** and 👎 **con** line. |
 | 💡 **A recommendation per question** | Claude marks its suggested pick and says *why*. |
 | ❓ **"The problem" context** | Each question can explain what the answer unblocks. |
+| 🔬 **Research‑first + cited findings** | With `--deep`/`--online`, Claude investigates first and shows a **findings** briefing panel with clickable sources; recommendations cite `file:line` and links. |
+| 📡 **Live adaptive interviews** | `--live` keeps one tab open and **streams new questions in as you answer** — branch on your choices, revise a past answer and it re‑asks downstream. |
 | 🔘 **Every input type** | Single‑select, multi‑select, and compact **yes/no pills**. |
 | 🧮 **Smart long lists** | ~15 short options auto‑flow into **two columns** to stay compact. |
 | ✍️ **Always an escape hatch** | Per‑question **"Other"** box + a global **"anything else?"** field. |
-| 🎨 **GitHub‑dark UI** | Clean, dense, easy on the eyes, sticky submit bar. |
+| 🎨 **Terminal / CLI aesthetic** | Monospace, a shell‑prompt header, `@clack`‑style `◇` step gutter, `○/◉` radios and `[ ]/[×]` checkboxes, a sticky `⏎ submit` bar. |
 | 📦 **Zero dependencies** | Pure Node built‑ins. One `.mjs` file. Localhost only. |
 | 🔌 **Skill or CLI** | Use it as a Claude Code skill, or run it standalone. |
 
@@ -118,7 +120,7 @@ Claude writes a JSON file and runs the server against it. The shape:
 | `multi` | Checkbox list | Pick any number. Same two‑column behavior. |
 | `yesno` | Compact Yes/No pills | `options` optional (auto Yes/No, or override for custom two‑choice labels). `allowOther` defaults off. |
 
-**Fields** — `id` (unique), `text`, `why?`, `type?`, `recommendation?` (`{optionId?, why?}`), `options` (`{id, label, pro?, con?}`), `allowOther?` (defaults on for single/multi). Top level takes a `title?` plus either `sections` or a flat `questions` array.
+**Fields** — `id` (unique), `text`, `why?`, `type?`, `recommendation?` (`{optionId?, why?}`), `options` (`{id, label, pro?, con?}`), `allowOther?` (defaults on for single/multi). Top level takes a `title?`, an optional **`findings?`** research briefing (`{ summary, sources: [{ label, ref }] }` — URL refs link, `file:line` refs get tagged), plus either `sections` or a flat `questions` array.
 
 ## 📤 What comes back
 
@@ -149,6 +151,20 @@ npx rizzdev-detective questions.json --out results.json
 
 It picks a free port, opens your browser (falls back to printing the URL), blocks until you submit, then writes/prints the results and exits.
 
+## 📡 Live mode — adaptive interviews
+
+For decision trees that branch on your answers, Claude can run a **live interview**: one open tab, questions streaming in as you go.
+
+```sh
+detective.mjs --live --out transcript.json   # persistent server (SSE)
+detective.mjs push <batch.json>              # inject a question batch
+detective.mjs wait                           # block until the user answers
+detective.mjs retract --from <batchId>       # drop stale downstream batches
+detective.mjs finish --out transcript.json   # end + print the transcript
+```
+
+Claude pushes a batch, waits for your answers, then pushes the next questions **branched on what you said**. Change your mind on an earlier answer and it **retracts + re‑asks** everything downstream. Still zero dependencies (SSE over the built‑in `http`), still localhost‑only.
+
 ## ⚙️ How it works
 
 ```
@@ -169,10 +185,10 @@ One run = one interview. It's stateless, localhost‑only, and never phones home
 ## 🧪 Development
 
 ```sh
-node --test        # 24 unit + integration tests, zero deps
+node --test        # 31 unit + integration tests, zero deps
 ```
 
-The code is one file (`detective.mjs`) with four small, independently‑tested pieces: `loadQuestions` (validate + normalize), `renderPage`, `normalizeResults`, and `serve`. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design and [`docs/PLAN.md`](docs/PLAN.md) for the build plan.
+The code is one file (`detective.mjs`) with small, independently‑tested pieces: `loadQuestions` (validate + normalize), `renderPage` / `renderBatchHtml`, `normalizeResults`, and the one‑shot `serve` + persistent `serveLive` servers. See [`docs/DESIGN.md`](docs/DESIGN.md) for the original design and [`docs/PLAN.md`](docs/PLAN.md) for the build plan.
 
 ## 📄 License
 

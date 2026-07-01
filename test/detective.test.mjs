@@ -5,6 +5,7 @@ import {
   normalizeQuestions,
   loadQuestions,
   renderPage,
+  renderBatchHtml,
   normalizeResults,
 } from '../detective.mjs';
 
@@ -82,6 +83,46 @@ test('yesno respects explicit options and an opt-in Other box', () => {
 test('validateQuestions rejects an unknown type but accepts yesno', () => {
   assert.throws(() => validateQuestions({ questions: [{ id: 'q', text: 't', type: 'dropdown', options: [{ id: 'a', label: 'A' }] }] }), /"single", "multi", or "yesno"/);
   assert.doesNotThrow(() => validateQuestions({ questions: [{ id: 'q', text: 't', type: 'yesno' }] }));
+});
+
+test('normalizeQuestions keeps a valid findings block and defaults source labels to ref', () => {
+  const n = normalizeQuestions({
+    findings: { summary: 'Repo uses D1.', sources: [{ ref: 'https://x.test/d1' }, { label: 'schema', ref: 'src/db.ts:4' }, { bad: 1 }] },
+    questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }],
+  });
+  assert.equal(n.findings.summary, 'Repo uses D1.');
+  assert.deepEqual(n.findings.sources, [
+    { label: 'https://x.test/d1', ref: 'https://x.test/d1' },
+    { label: 'schema', ref: 'src/db.ts:4' },
+  ]);
+});
+
+test('normalizeQuestions drops a malformed findings block', () => {
+  assert.equal(normalizeQuestions({ findings: { sources: [] }, questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] }).findings, undefined);
+  assert.equal(normalizeQuestions({ questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] }).findings, undefined);
+});
+
+test('renderPage renders a findings panel, linkifies URLs, and tags code refs', () => {
+  const html = renderPage(normalizeQuestions({
+    findings: { summary: 'See https://nextjs.org/docs and src/auth.ts:20 for context.', sources: [{ label: 'auth', ref: 'https://nextjs.org/docs' }] },
+    questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }],
+  }));
+  assert.match(html, /class="findings"/);
+  assert.match(html, /<a href="https:\/\/nextjs\.org\/docs"[^>]*>https:\/\/nextjs\.org\/docs<\/a>/);
+  assert.match(html, /<span class="ref">src\/auth\.ts:20<\/span>/);
+});
+
+test('renderPage linkifies a URL inside a recommendation why without mangling it', () => {
+  const html = renderPage(normalizeQuestions({ questions: [{
+    id: 'q', text: 't', recommendation: { optionId: 'a', why: 'per https://a.test:8080/x' },
+    options: [{ id: 'a', label: 'A' }] }] }));
+  assert.match(html, /<a href="https:\/\/a\.test:8080\/x"/);
+  assert.doesNotMatch(html, /<span class="ref">https/);
+});
+
+test('renderPage omits the findings panel when absent', () => {
+  const html = renderPage(normalizeQuestions({ questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] }));
+  assert.doesNotMatch(html, /class="findings"/);
 });
 
 test('renderPage flows a long list of short options into two columns', () => {
@@ -171,6 +212,24 @@ test('renderPage escapes HTML in labels to prevent breakage', () => {
   const html = renderPage(q);
   assert.doesNotMatch(html, /<script>bad<\/script>/);
   assert.match(html, /&lt;script&gt;bad&lt;\/script&gt;/);
+});
+
+// --- live batch rendering -------------------------------------------------
+
+test('renderBatchHtml wraps a batch with an id, its panels, and a continue button', () => {
+  const nq = normalizeQuestions({ sections: [{ title: 'auth', questions: [
+    { id: 'a', text: 'Which?', options: [{ id: 'x', label: 'X' }, { id: 'y', label: 'Y' }] },
+  ] }] });
+  const html = renderBatchHtml(nq, 3);
+  assert.match(html, /class="batch" data-batch="3"/);
+  assert.match(html, /class="section-title"/);
+  assert.match(html, /data-qid="a"[^>]*value="x"/);
+  assert.match(html, /onclick="sendBatch\(3\)"/);
+});
+
+test('renderBatchHtml renders a live findings briefing when present', () => {
+  const nq = normalizeQuestions({ findings: { summary: 'ctx' }, questions: [{ id: 'a', text: 't', options: [{ id: 'x', label: 'X' }] }] });
+  assert.match(renderBatchHtml(nq, 0), /class="findings"/);
 });
 
 // --- results --------------------------------------------------------------
