@@ -16,11 +16,11 @@
 
 <br/>
 
-<video src="https://github.com/rizzdev/rizzdev-detective/raw/main/assets/demo.mp4" controls muted autoplay loop playsinline width="720">
+<video src="https://pub-3ea8dda57c904fa193055512bab288c7.r2.dev/rizzdev-detective/demo.mp4" controls muted autoplay loop playsinline width="720">
   <img src="assets/preview.svg" alt="rizzdev-detective demo" width="720"/>
 </video>
 
-<sub><a href="https://github.com/rizzdev/rizzdev-detective/blob/main/assets/demo.mp4">▶ watch the demo</a> · or run <code>npx github:rizzdev/rizzdev-detective --demo</code></sub>
+<sub><a href="https://pub-3ea8dda57c904fa193055512bab288c7.r2.dev/rizzdev-detective/demo.mp4">▶ watch the demo</a> · or run <code>npx github:rizzdev/rizzdev-detective --demo</code></sub>
 
 </div>
 
