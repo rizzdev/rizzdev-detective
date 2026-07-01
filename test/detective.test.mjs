@@ -214,6 +214,13 @@ test('renderPage escapes HTML in labels to prevent breakage', () => {
   assert.match(html, /&lt;script&gt;bad&lt;\/script&gt;/);
 });
 
+test('renderPage wires keyboard-first navigation (hint + script)', () => {
+  const html = renderPage(normalizeQuestions({ questions: [{ id: 'a', text: 't', options: [{ id: 'x', label: 'X' }] }] }));
+  assert.match(html, /class="kbhint"/);
+  assert.match(html, /kfocusScan/);
+  assert.match(html, /id="kbhelp"/);
+});
+
 // --- drag-to-rank ---------------------------------------------------------
 
 test('normalizeQuestions handles the rank type (ordered semantics, no Other)', () => {

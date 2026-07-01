@@ -341,6 +341,15 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:#
 .endbar{display:flex;justify-content:flex-end;margin-top:16px}
 .endbar button{font:inherit;background:transparent;color:#7d8799;border:1px solid #2a3346;border-radius:5px;padding:4px 12px;font-size:.78rem;cursor:pointer}
 .endbar button:hover{border-color:#e58f8f;color:#e58f8f}
+
+/* keyboard-first navigation */
+.kfocus{outline:1.5px solid #6cb6ff;outline-offset:2px;border-radius:4px}
+.rankrow.kfocus{outline-offset:0}
+.kbhint{color:#3d4757;font-size:.73rem;margin-top:14px}
+.kbhint b{color:#6cb6ff;font-weight:700}
+#kbhelp{display:none;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);max-width:560px;background:#0d1219;border:1px solid #26324a;border-radius:9px;padding:12px 16px;font-size:.8rem;line-height:1.7;color:#a7b0c0;box-shadow:0 14px 44px rgba(0,0,0,.6);z-index:20}
+#kbhelp .kh{color:#7ee787;font-weight:700;margin-bottom:4px}
+#kbhelp b{color:#7ee787}
 `;
 
 // Shared client script: drag-to-reorder for every .rank list (idempotent).
@@ -355,6 +364,42 @@ function initRank(root){
     });
   });
 }`;
+
+// Keyboard-first navigation: focus ring over options/pills/rank rows, with
+// vim-style keys. Shared verbatim by the one-shot and live pages.
+const NAV_HTML = `<div class="kbhint"><b>j/k</b> move · <b>space</b> select · <b>1-9</b> pick · <b>o</b> other · <b>⏎</b> submit · <b>?</b> keys</div>
+<div id="kbhelp"><div class="kh"><b>keyboard</b></div>j / k &nbsp;or&nbsp; ↑ / ↓ — move focus<br>space — select · on a rank row: grab, then j/k to move, space to drop<br>1–9 — pick an option in the focused question<br>o — jump to the "other" box · ⏎ — submit / continue · ? — toggle · esc — cancel</div>`;
+
+const NAV_JS = `
+(function(){
+  var grabbed=null;
+  function foci(){return [].slice.call(document.querySelectorAll('.option,.pill,.rankrow'));}
+  function cur(){return document.querySelector('.kfocus');}
+  function setFocus(el){var c=cur();if(c)c.classList.remove('kfocus');if(el){el.classList.add('kfocus');el.scrollIntoView({block:'nearest'});}}
+  function move(dir){
+    if(grabbed){var lst=grabbed.parentNode,rows=[].slice.call(lst.querySelectorAll('.rankrow')),i=rows.indexOf(grabbed),j=i+dir;if(j<0||j>=rows.length)return;if(dir>0)lst.insertBefore(grabbed,rows[j].nextSibling);else lst.insertBefore(grabbed,rows[j]);grabbed.scrollIntoView({block:'nearest'});return;}
+    var list=foci();if(!list.length)return;var i=list.indexOf(cur());var n=i<0?0:Math.min(list.length-1,Math.max(0,i+dir));setFocus(list[n]);
+  }
+  function activate(){var c=cur();if(!c)return;if(c.classList.contains('rankrow')){if(grabbed===c){grabbed.classList.remove('grabbed');grabbed=null;}else{grabbed=c;c.classList.add('grabbed');}return;}var inp=c.querySelector('input');if(inp)inp.click();else c.click();}
+  function selectNum(n){var c=cur();var q=c?c.closest('.question'):document.querySelector('.question');if(!q)return;var opts=q.querySelectorAll('.option,.pill');if(opts[n-1]){setFocus(opts[n-1]);var inp=opts[n-1].querySelector('input');if(inp)inp.click();}}
+  function submit(){var conts=[].slice.call(document.querySelectorAll('.cont button:not([disabled])'));if(conts.length){conts[conts.length-1].click();return;}var s=document.getElementById('submit');if(s)s.click();}
+  function help(){var h=document.getElementById('kbhelp');if(h)h.style.display=h.style.display==='block'?'none':'block';}
+  document.addEventListener('keydown',function(e){
+    var t=e.target;if(t&&(t.tagName==='TEXTAREA'||(t.tagName==='INPUT'&&t.type==='text'))){if(e.key==='Escape')t.blur();return;}
+    var k=e.key;
+    if(k==='j'||k==='ArrowDown'){e.preventDefault();move(1);}
+    else if(k==='k'||k==='ArrowUp'){e.preventDefault();move(-1);}
+    else if(k===' '){e.preventDefault();activate();}
+    else if(k==='Enter'){e.preventDefault();submit();}
+    else if(k==='o'){var c=cur(),q=c?c.closest('.question'):null,o=q?q.querySelector('.other'):null;if(o){e.preventDefault();o.focus();}}
+    else if(k==='?'){e.preventDefault();help();}
+    else if(k==='Escape'){if(grabbed){grabbed.classList.remove('grabbed');grabbed=null;}var h=document.getElementById('kbhelp');if(h)h.style.display='none';}
+    else if(/^[1-9]$/.test(k)){e.preventDefault();selectNum(parseInt(k,10));}
+  });
+  window.kfocusScan=function(){if(!cur()){var f=foci();if(f.length)setFocus(f[0]);}};
+  window.kfocusIn=function(scope){if(!scope)return;var f=[].slice.call(scope.querySelectorAll('.option,.pill,.rankrow'));if(f.length)setFocus(f[0]);};
+  setTimeout(window.kfocusScan,60);
+})();`;
 
 export function renderPage(questions) {
   const title = questions.title ? esc(questions.title) : 'rizzdev-detective';
@@ -377,6 +422,7 @@ export function renderPage(questions) {
       <textarea id="__global" placeholder="notes not tied to a specific question…"></textarea>
     </div>
     <div class="bar"><button id="submit" type="button">submit answers</button></div>
+    ${NAV_HTML}
   </div>
 </div>
 <script>
@@ -395,6 +441,7 @@ function collect(){
 }
 ${RANK_JS}
 initRank(document);
+${NAV_JS}
 document.getElementById('submit').addEventListener('click', async () => {
   try {
     await fetch('/submit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(collect()) });
@@ -431,6 +478,7 @@ function renderLiveShell() {
     <div id="feed"></div>
     <div class="statusline" id="status"><span class="dotp"></span><span id="stext">connecting…</span></div>
     <div class="endbar"><button type="button" onclick="endInterview()">end interview</button></div>
+    ${NAV_HTML}
   </div>
 </div>
 <script>
@@ -484,10 +532,11 @@ async function resend(id){
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);initRank(feed);setStatus('','your move');window.scrollTo(0,1e9);});
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);initRank(feed);if(window.kfocusIn)window.kfocusIn(feed.querySelector('.batch[data-batch="'+d.id+'"]'));setStatus('','your move');window.scrollTo(0,1e9);});
 es.addEventListener('status',function(e){const d=JSON.parse(e.data);setStatus(d.kind||'',d.text||'');});
 es.addEventListener('retract',function(e){const d=JSON.parse(e.data);feed.querySelectorAll('.batch').forEach(function(el){if(Number(el.dataset.batch)>d.from)el.remove();});setStatus('think','claude is thinking…');});
 es.addEventListener('finish',function(e){es.close();const eb=document.querySelector('.endbar');if(eb)eb.remove();setStatus('done','interview complete — you can close this tab.');});
+${NAV_JS}
 </script>
 </body></html>`;
 }
