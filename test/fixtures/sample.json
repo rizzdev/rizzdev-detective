@@ -1,0 +1,15 @@
+{
+  "title": "Detective smoke test",
+  "sections": [{
+    "title": "Basics",
+    "questions": [{
+      "id": "color", "text": "Favorite color?", "why": "Confirms the form works end to end.",
+      "type": "single", "recommendation": { "optionId": "blue", "why": "It just is." },
+      "options": [
+        { "id": "blue", "label": "Blue", "pro": "Calm", "con": "Common" },
+        { "id": "red", "label": "Red", "pro": "Bold", "con": "Loud" }
+      ],
+      "allowOther": true
+    }]
+  }]
+}
