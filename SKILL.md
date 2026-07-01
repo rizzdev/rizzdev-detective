@@ -97,16 +97,19 @@ Then surface what you learned in the form:
      clickable, non-URL `ref`s render as tagged code refs. Omit it if research
      turned up nothing notable. See "Research first" above.
 
-2. **Run the server** (it blocks until the user submits):
+2. **Run it** (one blocking command — opens the live UI, blocks until submit):
 
    ```bash
    node ~/.claude/skills/rizzdev-detective/detective.mjs <questions.json> --out <results.json>
    ```
 
-   It prints the local URL to stderr and tries to open the browser. The command
-   returns only after the user hits Submit, printing the results JSON to stdout.
+   This is the unified live experience: it prints the local URL to stderr, opens
+   the browser, and returns once the user submits — printing JSON to stdout.
+   (There's a legacy static one-page form behind `--static` if ever needed.)
 
-3. **Read the results** and continue:
+3. **Read the result** and continue. Two possible shapes:
+
+   **They submitted** → the transcript:
 
    ```json
    {
@@ -117,9 +120,21 @@ Then surface what you learned in the form:
    ```
 
    `answers` is keyed by question `id`; `selected` holds chosen option ids
-   (0–1 for single, 0–n for multi); `other` is the per-question free-text box;
-   `globalNote` is the end-of-form "anything else?" box. Unanswered questions
-   come back with empty `selected` — partial submissions are fine.
+   (0–1 for single/yesno, 0–n for multi, full order for rank); `other` is the
+   per-question free-text box; `answers[id].delegated` is `true` if they hit
+   "you decide". Unanswered questions come back with empty `selected`.
+
+   **They hit a pushback action** (rethink / research / more) → a pending signal:
+
+   ```json
+   { "pending": { "type": "signal", "qid": "auth", "kind": "research",
+                  "note": "...", "other": "text they typed in Other" } }
+   ```
+
+   Rework that question accordingly (for `research`, do a `--deep`/`--online`
+   pass; honor `note` + `other`) and **re-run the command** with the improved
+   questions. For a genuinely branching, many-round interview in a *single* tab,
+   use **live mode** instead (below).
 
 ## Live mode (`--live`) — adaptive interviews
 

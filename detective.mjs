@@ -838,9 +838,10 @@ const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i 
 const SESSION_DEFAULT = `${tmpdir()}/rizzdev-detective-live.json`;
 
 const USAGE = `usage:
+  detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit)
   detective.mjs --demo                                    open a built-in sample interview
-  detective.mjs <questions.json> [--out <results.json>]   one-shot form
-  detective.mjs --live [--port N] [--out <file>]          start a live interview server
+  detective.mjs --static <questions.json>                 legacy static one-page form (fallback)
+  detective.mjs --live [--port N] [--out <file>]          start a persistent live server (adaptive)
   detective.mjs push <batch.json> [--port N]              push a question batch into the live server
   detective.mjs wait [--timeout SEC] [--port N]           block until the user answers a batch
   detective.mjs retract --from <batchId> [--port N]       drop batches after a revised answer
@@ -903,40 +904,133 @@ async function runLiveServer(args) {
   process.exit(0);
 }
 
+// The default path: the unified live experience as ONE blocking command.
+// Starts the live server in-process, pushes the whole batch, waits for the user
+// to submit, then finishes + prints the transcript. If they hit a pushback
+// action instead, returns { pending: <signal> } so the caller can rework and
+// re-run. (Multi-round adaptive interviews use --live + push/wait/finish.)
+async function runInterview(rawJson, args) {
+  const outPath = argFlag(args, 'out');
+  let base = null;
+  const done = serveLive({
+    port: Number(argFlag(args, 'port') || 8788),
+    onListen: (url, port) => {
+      base = `http://127.0.0.1:${port}`;
+      console.error(`\nrizzdev-detective ready → ${url}`);
+      console.error('Waiting for you to submit your answers…\n');
+      openBrowser(url);
+    },
+  });
+  done.catch(() => {});
+  while (!base) await new Promise((r) => setTimeout(r, 20));
+
+  const push = await fetch(`${base}/ctl/push`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: rawJson });
+  if (!push.ok) {
+    let msg = 'invalid questions';
+    try { msg = (await push.json()).error || msg; } catch {}
+    await fetch(`${base}/ctl/finish`, { method: 'POST', body: '{}' }).catch(() => {});
+    console.error(`error: ${msg}`);
+    process.exit(1);
+  }
+
+  const wait = await (await fetch(`${base}/ctl/wait?timeout=${argFlag(args, 'timeout') || 1800}`)).json();
+  const signal = (wait.events || []).find((e) => e.type === 'signal');
+  let output;
+  if (signal) {
+    output = { pending: signal };
+    await fetch(`${base}/ctl/finish`, { method: 'POST', body: '{}' }).catch(() => {});
+  } else {
+    output = await (await fetch(`${base}/ctl/finish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+  }
+  await done.catch(() => {});
+  if (outPath) writeFileSync(outPath, JSON.stringify(output, null, 2));
+  process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+  process.exit(0);
+}
+
+async function runDefault(args) {
+  let raw;
+  if (args.includes('--demo')) {
+    raw = JSON.stringify(DEMO_QUESTIONS);
+  } else {
+    const path = args.find((a) => !a.startsWith('--'));
+    if (!path) { console.error(USAGE); process.exit(2); }
+    try { raw = readFileSync(path, 'utf8'); }
+    catch (e) { console.error(`error: cannot read ${path}: ${e.message}`); process.exit(1); }
+  }
+  return runInterview(raw, args);
+}
+
 // A self-contained sample interview so `--demo` (and the npx one-liner) works
-// with zero setup — showcases findings, pros/cons, yes/no, multi, and rank.
+// with zero setup. Modeled on a real Claude Code moment — implementing a
+// feature into an existing codebase — so it shows what the tool is for.
 export const DEMO_QUESTIONS = {
-  title: 'rizzdev-detective — demo',
+  title: 'implement: file uploads',
   findings: {
-    summary: "A Claude Code skill that hands you a whole batch of questions at once — with pros/cons, a recommendation, and (in --live mode) adaptive follow-ups.\nKeyboard: j/k move · space select · 1-9 pick · ? for all keys.",
-    sources: [{ label: 'github.com/rizzdev/rizzdev-detective', ref: 'https://github.com/rizzdev/rizzdev-detective' }],
+    summary: "Scanned the codebase before asking: a TypeScript API with Postgres, no object storage wired up yet.\nBest practice for user uploads is to presign direct-to-storage so large files never touch your app server, plus a size/type allowlist and a scan step for user-supplied content. Recs below favor a secure, ship-able v1.",
+    sources: [
+      { label: 'src/api/routes.ts — existing endpoints', ref: 'src/api/routes.ts:1' },
+      { label: 'OWASP file-upload cheat sheet', ref: 'https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html' },
+      { label: 'S3 presigned uploads', ref: 'https://docs.aws.amazon.com/AmazonS3/latest/userguide/PresignedUrlUploadObject.html' },
+    ],
   },
   sections: [
-    { title: 'the basics', questions: [
-      { id: 'impression', text: 'First impression?', type: 'single',
-        recommendation: { optionId: 'love', why: 'the terminal look tends to win people over' },
+    { title: 'storage & transport', questions: [
+      { id: 'store', text: 'Where should uploaded files live?',
+        why: 'Determines cost, egress, and how much infra you take on.',
+        type: 'single',
+        recommendation: { optionId: 'r2', why: 'S3-compatible with no egress fees — cheap for user files' },
         options: [
-          { id: 'love', label: 'Love the terminal look', pro: 'ships', con: 'none' },
-          { id: 'fine', label: "It's fine", pro: 'honest', con: 'ouch' },
-          { id: 'no', label: 'Not for me', pro: 'fair', con: 'sad' },
+          { id: 'r2', label: 'Cloudflare R2', pro: 'no egress fees, S3-compatible', con: 'newer tooling' },
+          { id: 's3', label: 'AWS S3', pro: 'ubiquitous, mature ecosystem', con: 'egress costs add up' },
+          { id: 'disk', label: 'Local disk / volume', pro: 'simplest to start', con: "doesn't scale; lost on redeploy" },
         ], allowOther: true },
-      { id: 'star', text: 'Star the repo?', type: 'yesno', recommendation: { optionId: 'yes', why: 'it genuinely helps' } },
+      { id: 'method', text: 'How do uploads reach storage?',
+        why: 'The single biggest architecture call here.',
+        type: 'single',
+        recommendation: { optionId: 'presign', why: 'keeps large files off your server — cheaper and scalable' },
+        options: [
+          { id: 'presign', label: 'Presigned direct-to-storage', pro: 'files skip your server; scales', con: 'more moving parts' },
+          { id: 'stream', label: 'Stream through the API server', pro: 'simplest to reason about', con: 'server bandwidth + memory pressure' },
+        ] },
     ] },
-    { title: 'which features grab you? (multi)', questions: [
-      { id: 'features', text: 'Pick any', type: 'multi', options: [
-        { id: 'live', label: 'Live adaptive interviews' },
-        { id: 'rank', label: 'Drag-to-rank' },
-        { id: 'kbd', label: 'Keyboard-first' },
-        { id: 'research', label: 'Research + citations' },
-        { id: 'pushback', label: 'Push-back actions' },
-        { id: 'zerodep', label: 'Zero dependencies' },
-      ] },
+    { title: 'handling & safety', questions: [
+      { id: 'images', text: 'How should images be processed?', type: 'single',
+        why: 'Image handling drives payload size, read latency, and how much pipeline you maintain.',
+        recommendation: { optionId: 'ondemand', why: 'store one original, transform via CDN on request' },
+        options: [
+          { id: 'ondemand', label: 'Transform on-demand (CDN/worker)', pro: 'store one original', con: 'first-hit latency' },
+          { id: 'onupload', label: 'Resize on upload', pro: 'fast reads', con: 'reprocess to add sizes' },
+          { id: 'asis', label: 'Store as-is', pro: 'no pipeline', con: 'heavy payloads to clients' },
+        ] },
+      { id: 'limits', text: 'Enforce a max size + type allowlist?', type: 'yesno',
+        why: 'Without a ceiling, one request can exhaust disk, memory, or your bill.',
+        recommendation: { optionId: 'yes', why: 'first line of defense against abuse' } },
+      { id: 'scan', text: 'Scan uploads for malware?', type: 'yesno',
+        why: "Uploads are attacker-controlled bytes you'll serve back to other users.",
+        recommendation: { optionId: 'yes', why: "it's user-supplied content served to others" } },
     ] },
-    { title: 'priorities', questions: [
-      { id: 'priorities', text: 'Rank what matters most to you (drag)', type: 'rank', priority: true, options: [
-        { id: 'fast', label: 'Fast' }, { id: 'clean', label: 'Clean UI' },
-        { id: 'flexible', label: 'Flexible' }, { id: 'simple', label: 'Simple' },
-      ] },
+    { title: 'scope & rollout', questions: [
+      { id: 'extras', text: 'Include which of these in v1? (pick any)', type: 'multi',
+        why: 'Each is nice-to-have but adds surface area — pick what earns its keep in v1.',
+        options: [
+          { id: 'progress', label: 'Upload progress UI', pro: 'clear feedback on big files', con: 'needs upload events wired up' },
+          { id: 'dragdrop', label: 'Drag-and-drop', pro: 'expected UX affordance', con: 'extra client handling + a11y care' },
+          { id: 'resumable', label: 'Resumable / chunked uploads', pro: 'survives flaky networks', con: 'chunk tracking + reassembly' },
+          { id: 'signed', label: 'Signed (expiring) download URLs', pro: 'private files stay private', con: 'expiry + re-issue flow' },
+          { id: 'thumbs', label: 'Thumbnails', pro: 'fast grids and previews', con: 'a generation + storage step' },
+          { id: 'cleanup', label: 'Orphan-file cleanup job', pro: 'reclaims abandoned bytes', con: 'a scheduled job to own' },
+        ] },
+      { id: 'priorities', text: 'Rank the implementation steps by priority (drag)', type: 'rank', priority: true,
+        why: 'Order the build so each step unblocks the next and value ships early.',
+        options: [
+          { id: 'presign', label: 'Presign endpoint', pro: 'unblocks everything else' },
+          { id: 'widget', label: 'Client upload widget', pro: 'the surface users actually touch' },
+          { id: 'validate', label: 'Validation + size/type limits', pro: 'gate before you trust bytes' },
+          { id: 'records', label: 'DB records + metadata', pro: 'ties files to their owners' },
+          { id: 'downloads', label: 'Signed download URLs', pro: 'needed once files are private' },
+          { id: 'gc', label: 'Cleanup / garbage collection', pro: 'safe to defer until volume grows' },
+        ] },
     ] },
   ],
 };
@@ -969,7 +1063,8 @@ async function main() {
   const cmd = args.filter((a) => !a.startsWith('--'))[0];
   if (args.includes('--live')) return runLiveServer(args);
   if (['push', 'wait', 'retract', 'finish', 'state'].includes(cmd)) return runControl(cmd, args);
-  return runOneShot(args);
+  if (args.includes('--static')) return runOneShot(args); // hidden fallback: legacy static one-page form
+  return runDefault(args); // default: unified live interview (one blocking command)
 }
 
 // Resolve argv[1] through realpath so this still runs when invoked via a
