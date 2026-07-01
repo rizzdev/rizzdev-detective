@@ -214,6 +214,12 @@ test('renderPage escapes HTML in labels to prevent breakage', () => {
   assert.match(html, /&lt;script&gt;bad&lt;\/script&gt;/);
 });
 
+test('renderQuestion exposes the recommended option id (for "you decide")', () => {
+  const html = renderPage(normalizeQuestions({ questions: [{ id: 'q', text: 't',
+    recommendation: { optionId: 'a' }, options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }] }));
+  assert.match(html, /data-qid="q" data-rec="a"/);
+});
+
 test('renderPage wires keyboard-first navigation (hint + script)', () => {
   const html = renderPage(normalizeQuestions({ questions: [{ id: 'a', text: 't', options: [{ id: 'x', label: 'X' }] }] }));
   assert.match(html, /class="kbhint"/);

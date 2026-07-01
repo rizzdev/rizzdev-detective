@@ -200,8 +200,9 @@ function renderQuestion(q) {
     : q.render === 'rank'
       ? renderRankItems(q)
       : `<div class="options${twoCol ? ' two-col' : ''}">${q.options.map((o) => renderOption(q, o)).join('')}</div>`;
+  const recAttr = q.recommendation && q.recommendation.optionId ? ` data-rec="${esc(q.recommendation.optionId)}"` : '';
   return `
-    <section class="question" data-qid="${esc(q.id)}">
+    <section class="question" data-qid="${esc(q.id)}"${recAttr}>
       <h3>${esc(q.text)}</h3>
       ${why}
       ${rec}
@@ -350,6 +351,13 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:#
 #kbhelp{display:none;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);max-width:560px;background:#0d1219;border:1px solid #26324a;border-radius:9px;padding:12px 16px;font-size:.8rem;line-height:1.7;color:#a7b0c0;box-shadow:0 14px 44px rgba(0,0,0,.6);z-index:20}
 #kbhelp .kh{color:#7ee787;font-weight:700;margin-bottom:4px}
 #kbhelp b{color:#7ee787}
+
+/* response-action bar (live mode) */
+.qactions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;padding-left:15px}
+.qactions button{font:inherit;background:transparent;color:#7d8799;border:1px solid #222a3a;border-radius:5px;padding:2px 9px;font-size:.74rem;cursor:pointer}
+.qactions button:hover{border-color:#6cb6ff;color:#6cb6ff}
+.question.delegated>h3::after{content:" · delegated to claude ✓";color:#8fd694;font-weight:600;font-size:.72rem}
+.question.awaiting{opacity:.55}
 `;
 
 // Shared client script: drag-to-reorder for every .rank list (idempotent).
@@ -392,6 +400,7 @@ const NAV_JS = `
     else if(k===' '){e.preventDefault();activate();}
     else if(k==='Enter'){e.preventDefault();submit();}
     else if(k==='o'){var c=cur(),q=c?c.closest('.question'):null,o=q?q.querySelector('.other'):null;if(o){e.preventDefault();o.focus();}}
+    else if((k==='d'||k==='r'||k==='s'||k==='m')&&window.qaction){var cq=cur()&&cur().closest('.question');if(cq){e.preventDefault();window.qaction({d:'decide',r:'rethink',s:'research',m:'more'}[k],cq);}}
     else if(k==='?'){e.preventDefault();help();}
     else if(k==='Escape'){if(grabbed){grabbed.classList.remove('grabbed');grabbed=null;}var h=document.getElementById('kbhelp');if(h)h.style.display='none';}
     else if(/^[1-9]$/.test(k)){e.preventDefault();selectNum(parseInt(k,10));}
@@ -477,7 +486,7 @@ function renderLiveShell() {
     <div class="prompt"><span class="sym">$</span> ./detective --live<span class="cursor"></span></div>
     <div id="feed"></div>
     <div class="statusline" id="status"><span class="dotp"></span><span id="stext">connecting…</span></div>
-    <div class="endbar"><button type="button" onclick="endInterview()">end interview</button></div>
+    <div class="endbar"><button type="button" onclick="decideRest()">decide the rest →</button><button type="button" onclick="endInterview()">end interview</button></div>
     ${NAV_HTML}
   </div>
 </div>
@@ -496,9 +505,42 @@ function collect(id){
     const sel=rank?[...rank.querySelectorAll('.rankrow')].map(r=>r.dataset.oid)
                   :[...el.querySelectorAll('input[data-qid="'+qid+'"]:checked')].map(i=>i.value);
     const o=el.querySelector('[id="other__'+qid+'"]');
-    ans[qid]={selected:sel,other:o?o.value:''};
+    const q=el.querySelector('.question[data-qid="'+qid+'"]');
+    ans[qid]={selected:sel,other:o?o.value:'',delegated:!!(q&&q.classList.contains('delegated'))};
   });
   return ans;
+}
+function batchOf(q){const b=q.closest('.batch');return b?Number(b.dataset.batch):null;}
+function addActions(scope){
+  if(!scope)return;
+  scope.querySelectorAll('.question').forEach(function(q){
+    if(q.querySelector('.qactions'))return;
+    const bar=document.createElement('div');bar.className='qactions';
+    [['decide','↳ you decide'],['rethink','↻ rethink'],['research','⌕ research'],['more','＋ more']].forEach(function(a){
+      const b=document.createElement('button');b.type='button';b.textContent=a[1];b.onclick=function(){doAction(q,a[0]);};bar.appendChild(b);
+    });
+    q.appendChild(bar);
+  });
+}
+function doAction(q,kind){
+  if(!q)return;
+  if(kind==='decide'){const rec=q.dataset.rec;if(rec){const inp=q.querySelector('input[value="'+rec+'"]');if(inp)inp.checked=true;}q.classList.add('delegated');return;}
+  let note='';
+  if(kind==='rethink'){note=prompt("What's off? What should I aim for instead? (optional)")||'';}
+  q.classList.add('awaiting');setStatus('think','claude is thinking…');
+  post('/signal',{batch:batchOf(q),qid:q.dataset.qid,kind:kind,note:note});
+}
+window.qaction=function(kind,q){doAction(q||(document.querySelector('.kfocus')&&document.querySelector('.kfocus').closest('.question')),kind);};
+function decideRest(){
+  const open=[...feed.querySelectorAll('.batch:not(.spent)')];
+  if(!open.length)return;
+  const b=open[open.length-1];
+  b.querySelectorAll('.question').forEach(function(q){
+    if(q.querySelector('input:checked'))return;
+    const rec=q.dataset.rec;if(rec){const inp=q.querySelector('input[value="'+rec+'"]');if(inp)inp.checked=true;}
+    q.classList.add('delegated');
+  });
+  sendBatch(Number(b.dataset.batch));
 }
 ${RANK_JS}
 function lock(el,on){el.querySelectorAll('input,textarea').forEach(function(i){i.disabled=on;});}
@@ -532,7 +574,7 @@ async function resend(id){
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);initRank(feed);if(window.kfocusIn)window.kfocusIn(feed.querySelector('.batch[data-batch="'+d.id+'"]'));setStatus('','your move');window.scrollTo(0,1e9);});
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);if(window.kfocusIn)window.kfocusIn(nb);setStatus('','your move');window.scrollTo(0,1e9);});
 es.addEventListener('status',function(e){const d=JSON.parse(e.data);setStatus(d.kind||'',d.text||'');});
 es.addEventListener('retract',function(e){const d=JSON.parse(e.data);feed.querySelectorAll('.batch').forEach(function(el){if(Number(el.dataset.batch)>d.from)el.remove();});setStatus('think','claude is thinking…');});
 es.addEventListener('finish',function(e){es.close();const eb=document.querySelector('.endbar');if(eb)eb.remove();setStatus('done','interview complete — you can close this tab.');});
@@ -665,6 +707,7 @@ export function serveLive(opts = {}) {
             state.answers[k] = {
               selected: Array.isArray(a.selected) ? a.selected.filter((s) => typeof s === 'string') : [],
               other: typeof a.other === 'string' ? a.other : '',
+              ...(a.delegated ? { delegated: true } : {}),
             };
           }
           state.pending.push({ type: 'answer', batch: d.batch, revised: !!d.revised, answers: state.answers });
@@ -676,6 +719,16 @@ export function serveLive(opts = {}) {
       }
       if (req.method === 'POST' && p === '/end') {
         state.pending.push({ type: 'ended' }); settle(); json(200, { ok: true }); return;
+      }
+      if (req.method === 'POST' && p === '/signal') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          state.pending.push({ type: 'signal', batch: d.batch, qid: d.qid, kind: d.kind, note: typeof d.note === 'string' ? d.note : '' });
+          broadcast('status', { kind: 'think', text: 'claude is thinking…' });
+          settle();
+          json(200, { ok: true });
+        });
+        return;
       }
       if (req.method === 'POST' && p === '/ctl/push') {
         readBody(req).then((body) => {
