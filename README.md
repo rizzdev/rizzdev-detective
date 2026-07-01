@@ -22,6 +22,12 @@
 
 <sub><a href="https://pub-3ea8dda57c904fa193055512bab288c7.r2.dev/rizzdev-detective/demo.mp4">▶ watch the demo</a> · or run <code>npx github:rizzdev/rizzdev-detective --demo</code></sub>
 
+<br/><br/>
+
+<img src="assets/screenshot.png" alt="A real rizzdev-detective session — architecture decisions with pros/cons, a recommendation, and in-place pushback actions" width="760"/>
+
+<sub>A real session: pros/cons and a recommendation on every option, plus in-place <b>you decide · rethink · research · more</b> pushback.</sub>
+
 </div>
 
 ---
