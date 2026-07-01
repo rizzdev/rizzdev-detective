@@ -550,10 +550,12 @@ function addActions(scope){
 function doAction(q,kind){
   if(!q)return;
   if(kind==='decide'){const rec=q.dataset.rec;if(rec){const inp=q.querySelector('input[value="'+rec+'"]');if(inp)inp.checked=true;}q.classList.add('delegated');return;}
+  const otherEl=q.querySelector('.other');
+  const other=otherEl?otherEl.value.trim():'';
   let note='';
-  if(kind==='rethink'){note=prompt("What's off? What should I aim for instead? (optional)")||'';}
+  if(kind==='rethink'){note=(prompt("What's off? What should I aim for instead?", other)||'').trim();}
   q.classList.add('awaiting');setStatus('think','claude is thinking…');
-  post('/signal',{batch:batchOf(q),qid:q.dataset.qid,kind:kind,note:note});
+  post('/signal',{batch:batchOf(q),qid:q.dataset.qid,kind:kind,note:note,other:other});
 }
 window.qaction=function(kind,q){doAction(q||(document.querySelector('.kfocus')&&document.querySelector('.kfocus').closest('.question')),kind);};
 function decideRest(){
@@ -748,7 +750,7 @@ export function serveLive(opts = {}) {
       if (req.method === 'POST' && p === '/signal') {
         readBody(req).then((body) => {
           let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
-          state.pending.push({ type: 'signal', batch: d.batch, qid: d.qid, kind: d.kind, note: typeof d.note === 'string' ? d.note : '' });
+          state.pending.push({ type: 'signal', batch: d.batch, qid: d.qid, kind: d.kind, note: typeof d.note === 'string' ? d.note : '', other: typeof d.other === 'string' ? d.other : '' });
           broadcast('status', { kind: 'think', text: 'claude is thinking…' });
           settle();
           json(200, { ok: true });

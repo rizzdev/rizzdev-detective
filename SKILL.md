@@ -144,10 +144,12 @@ they said — all in one open browser tab.
      - `{type:"answer", batch, answers, revised?}` — they submitted a batch. If
        `revised:true`, they changed an earlier answer → `retract --from <batchId>`
        to drop the now-stale later batches, then push a fresh branch.
-     - `{type:"signal", batch, qid, kind, note}` — a pushback action: `rethink`
-       (repush bolder/different options; honor `note`), `research` (do a deep +
-       online pass scoped to that question, then repush with updated findings/
-       options), `more` (append options), `decide` (resolve from your rec).
+     - `{type:"signal", batch, qid, kind, note, other}` — a pushback action:
+       `rethink` (repush bolder/different options; honor `note`), `research` (do
+       a deep + online pass scoped to that question, then repush with updated
+       findings/options), `more` (append options). `other` carries whatever the
+       user had typed in that question's "Other" box when they hit the button —
+       always read it; they may have used it to hand you information.
      - `{type:"ended"}` — the user hit "end interview" → `finish`.
    - `retract --from <batchId>` — drop every batch after `batchId` (and their
      answers). Use after a revised upstream answer, or a `rethink`/`research`.
