@@ -36,7 +36,7 @@ test('validateQuestions rejects duplicate question ids', () => {
 
 test('validateQuestions rejects bad type', () => {
   const bad = { questions: [{ id: 'q1', text: 't', type: 'dropdown', options: [{ id: 'a', label: 'A' }] }] };
-  assert.throws(() => validateQuestions(bad), /"single", "multi", or "yesno"/);
+  assert.throws(() => validateQuestions(bad), /"single", "multi", "yesno", or "rank"/);
 });
 
 test('normalizeQuestions wraps flat questions in one section and applies defaults', () => {
@@ -81,7 +81,7 @@ test('yesno respects explicit options and an opt-in Other box', () => {
 });
 
 test('validateQuestions rejects an unknown type but accepts yesno', () => {
-  assert.throws(() => validateQuestions({ questions: [{ id: 'q', text: 't', type: 'dropdown', options: [{ id: 'a', label: 'A' }] }] }), /"single", "multi", or "yesno"/);
+  assert.throws(() => validateQuestions({ questions: [{ id: 'q', text: 't', type: 'dropdown', options: [{ id: 'a', label: 'A' }] }] }), /"single", "multi", "yesno", or "rank"/);
   assert.doesNotThrow(() => validateQuestions({ questions: [{ id: 'q', text: 't', type: 'yesno' }] }));
 });
 
@@ -212,6 +212,36 @@ test('renderPage escapes HTML in labels to prevent breakage', () => {
   const html = renderPage(q);
   assert.doesNotMatch(html, /<script>bad<\/script>/);
   assert.match(html, /&lt;script&gt;bad&lt;\/script&gt;/);
+});
+
+// --- drag-to-rank ---------------------------------------------------------
+
+test('normalizeQuestions handles the rank type (ordered semantics, no Other)', () => {
+  const n = normalizeQuestions({ questions: [{ id: 'r', text: 'order', type: 'rank',
+    options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }] });
+  const q = n.sections[0].questions[0];
+  assert.equal(q.type, 'rank');
+  assert.equal(q.render, 'rank');
+  assert.equal(q.allowOther, false);
+});
+
+test('validateQuestions accepts rank and still rejects unknown types', () => {
+  assert.doesNotThrow(() => validateQuestions({ questions: [{ id: 'r', text: 't', type: 'rank', options: [{ id: 'a', label: 'A' }] }] }));
+  assert.throws(() => validateQuestions({ questions: [{ id: 'r', text: 't', type: 'slider', options: [{ id: 'a', label: 'A' }] }] }), /"single", "multi", "yesno", or "rank"/);
+});
+
+test('renderPage renders a rank list with draggable rows', () => {
+  const html = renderPage(normalizeQuestions({ questions: [{ id: 'r', text: 'order', type: 'rank',
+    options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }] }));
+  assert.match(html, /class="rank" data-qid="r"/);
+  assert.match(html, /class="rankrow" draggable="true" data-oid="a"/);
+});
+
+test('normalizeResults preserves rank order as the full selected array', () => {
+  const nq = normalizeQuestions({ questions: [{ id: 'r', text: 'o', type: 'rank',
+    options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }] }] });
+  const res = normalizeResults({ answers: { r: { selected: ['c', 'a', 'b'] } } }, nq, 'T');
+  assert.deepEqual(res.answers.r.selected, ['c', 'a', 'b']);
 });
 
 // --- live batch rendering -------------------------------------------------

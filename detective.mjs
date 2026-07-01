@@ -25,8 +25,8 @@ export function validateQuestions(doc) {
       if (seen.has(q.id)) throw new Error(`duplicate question id: ${q.id}`);
       seen.add(q.id);
       if (typeof q.text !== 'string' || !q.text) throw new Error(`question ${q.id} needs "text"`);
-      if (q.type !== undefined && q.type !== 'single' && q.type !== 'multi' && q.type !== 'yesno') {
-        throw new Error(`question ${q.id} type must be "single", "multi", or "yesno"`);
+      if (q.type !== undefined && !['single', 'multi', 'yesno', 'rank'].includes(q.type)) {
+        throw new Error(`question ${q.id} type must be "single", "multi", "yesno", or "rank"`);
       }
       // "yesno" questions auto-generate Yes/No options, so options are optional there.
       if (q.type !== 'yesno' && (!Array.isArray(q.options) || q.options.length === 0)) {
@@ -55,6 +55,7 @@ export function normalizeQuestions(doc) {
     title: typeof sec.title === 'string' ? sec.title : undefined,
     questions: sec.questions.map((q) => {
       const isYesNo = q.type === 'yesno';
+      const isRank = q.type === 'rank';
       const rawOptions = Array.isArray(q.options) && q.options.length ? q.options : null;
       const options = isYesNo && !rawOptions
         ? [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
@@ -63,15 +64,16 @@ export function normalizeQuestions(doc) {
         id: q.id,
         text: q.text,
         why: typeof q.why === 'string' ? q.why : undefined,
-        // yesno shares single-select semantics; `render` drives the layout.
-        type: q.type === 'multi' ? 'multi' : 'single',
-        render: isYesNo ? 'pills' : 'list',
+        // `type` drives result semantics; `render` drives the layout.
+        // yesno → single-select semantics; rank → its own ordered semantics.
+        type: isRank ? 'rank' : q.type === 'multi' ? 'multi' : 'single',
+        render: isYesNo ? 'pills' : isRank ? 'rank' : 'list',
         recommendation: q.recommendation && typeof q.recommendation === 'object'
           ? { optionId: q.recommendation.optionId, why: q.recommendation.why }
           : undefined,
         options,
-        // Other box is off by default for yesno, on by default otherwise.
-        allowOther: isYesNo ? q.allowOther === true : q.allowOther !== false,
+        // Other box is off by default for yesno/rank, on by default otherwise.
+        allowOther: isYesNo || isRank ? q.allowOther === true : q.allowOther !== false,
       };
     }),
   }));
@@ -178,6 +180,12 @@ function renderPill(q, o) {
   return `<label class="pill${recommended ? ' recommended' : ''}"><input type="${inputType}" name="q__${esc(q.id)}" data-qid="${esc(q.id)}" value="${esc(o.id)}">${esc(o.label)}${star}</label>`;
 }
 
+function renderRankItems(q) {
+  return `<ol class="rank" data-qid="${esc(q.id)}">${q.options.map((o) =>
+    `<li class="rankrow" draggable="true" data-oid="${esc(o.id)}"><span class="grip">⠿</span><span class="rlabel">${esc(o.label)}</span>${o.pro ? `<span class="rpro">${fmt(o.pro)}</span>` : ''}</li>`,
+  ).join('')}</ol>`;
+}
+
 function renderQuestion(q) {
   const why = q.why ? `<p class="why"><span class="why-tag">The problem</span> ${esc(q.why)}</p>` : '';
   const rec = q.recommendation && q.recommendation.why
@@ -189,7 +197,9 @@ function renderQuestion(q) {
   const twoCol = q.render === 'list' && q.options.length >= 6 && shortEnough;
   const controls = q.render === 'pills'
     ? `<div class="pills">${q.options.map((o) => renderPill(q, o)).join('')}</div>`
-    : `<div class="options${twoCol ? ' two-col' : ''}">${q.options.map((o) => renderOption(q, o)).join('')}</div>`;
+    : q.render === 'rank'
+      ? renderRankItems(q)
+      : `<div class="options${twoCol ? ' two-col' : ''}">${q.options.map((o) => renderOption(q, o)).join('')}</div>`;
   return `
     <section class="question" data-qid="${esc(q.id)}">
       <h3>${esc(q.text)}</h3>
@@ -274,6 +284,17 @@ a:hover{color:#9ecbff;border-bottom-color:#6cb6ff}
 .pro{color:#8fd694}.pro::before{content:"+ ";font-weight:700}
 .con{color:#e58f8f}.con::before{content:"- ";font-weight:700}
 
+/* drag-to-rank */
+.rank{list-style:none;counter-reset:rk;margin:2px 0 0;padding-left:15px;display:flex;flex-direction:column;gap:3px}
+.rankrow{counter-increment:rk;display:flex;align-items:center;gap:8px;background:#080b11;border:1px solid #222a3a;border-radius:5px;padding:5px 10px;cursor:grab}
+.rankrow::before{content:counter(rk)".";color:#6cb6ff;font-weight:700;min-width:16px}
+.rankrow.drag{opacity:.4;border-color:#6cb6ff}
+.rankrow.over{border-color:#7ee787}
+.rankrow .grip{color:#4b566b;cursor:grab}
+.rankrow .rlabel{font-weight:600;color:#e9edf4}
+.rankrow .rpro{color:#8fd694;font-size:.74rem;margin-left:auto}
+.rankrow.grabbed{border-color:#e2b86b;background:#161207}
+
 .pills{display:flex;gap:8px;flex-wrap:wrap;padding-left:15px;margin-top:2px}
 .pill{position:relative;display:inline-flex;align-items:center;background:transparent;border:1px solid #2a3346;border-radius:4px;padding:2px 11px;cursor:pointer;font-weight:600;color:#7d8799}
 .pill::before{content:"[ "}.pill::after{content:" ]"}
@@ -322,6 +343,19 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:#
 .endbar button:hover{border-color:#e58f8f;color:#e58f8f}
 `;
 
+// Shared client script: drag-to-reorder for every .rank list (idempotent).
+const RANK_JS = `
+function initRank(root){
+  root.querySelectorAll('.rank').forEach(function(list){
+    if(list.dataset.rankInit)return; list.dataset.rankInit='1';
+    list.querySelectorAll('.rankrow').forEach(function(row){
+      row.addEventListener('dragstart',function(e){window.__drag=row;row.classList.add('drag');if(e.dataTransfer)e.dataTransfer.effectAllowed='move';});
+      row.addEventListener('dragend',function(){row.classList.remove('drag');window.__drag=null;});
+      row.addEventListener('dragover',function(e){e.preventDefault();var d=window.__drag;if(!d||d===row||d.parentNode!==list)return;var r=row.getBoundingClientRect();var after=(e.clientY-r.top)/r.height>0.5;list.insertBefore(d,after?row.nextSibling:row);});
+    });
+  });
+}`;
+
 export function renderPage(questions) {
   const title = questions.title ? esc(questions.title) : 'rizzdev-detective';
   const body = renderFindings(questions.findings) + questions.sections.map(renderSection).join('');
@@ -350,13 +384,17 @@ const DETECTIVE = ${dataIsland};
 function collect(){
   const answers = {};
   for (const sec of DETECTIVE.sections) for (const q of sec.questions) {
-    const sel = [...document.querySelectorAll('input[data-qid="'+q.id+'"]:checked')].map(el => el.value);
+    let sel;
+    if(q.render==='rank'){ sel=[...document.querySelectorAll('.rank[data-qid="'+q.id+'"] .rankrow')].map(r=>r.dataset.oid); }
+    else { sel=[...document.querySelectorAll('input[data-qid="'+q.id+'"]:checked')].map(el => el.value); }
     const otherEl = document.getElementById('other__'+q.id);
     answers[q.id] = { selected: sel, other: otherEl ? otherEl.value : '' };
   }
   const g = document.getElementById('__global');
   return { answers, globalNote: g ? g.value : '' };
 }
+${RANK_JS}
+initRank(document);
 document.getElementById('submit').addEventListener('click', async () => {
   try {
     await fetch('/submit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(collect()) });
@@ -402,13 +440,19 @@ function setStatus(k,t){statusEl.className='statusline'+(k?' '+k:'');stext.textC
 function collect(id){
   const el=feed.querySelector('.batch[data-batch="'+id+'"]');
   const ans={};
-  new Set([...el.querySelectorAll('input[data-qid]')].map(i=>i.dataset.qid)).forEach(function(qid){
-    const sel=[...el.querySelectorAll('input[data-qid="'+qid+'"]:checked')].map(i=>i.value);
+  const qids=new Set();
+  el.querySelectorAll('input[data-qid]').forEach(i=>qids.add(i.dataset.qid));
+  el.querySelectorAll('.rank[data-qid]').forEach(r=>qids.add(r.dataset.qid));
+  qids.forEach(function(qid){
+    const rank=el.querySelector('.rank[data-qid="'+qid+'"]');
+    const sel=rank?[...rank.querySelectorAll('.rankrow')].map(r=>r.dataset.oid)
+                  :[...el.querySelectorAll('input[data-qid="'+qid+'"]:checked')].map(i=>i.value);
     const o=el.querySelector('[id="other__'+qid+'"]');
     ans[qid]={selected:sel,other:o?o.value:''};
   });
   return ans;
 }
+${RANK_JS}
 function lock(el,on){el.querySelectorAll('input,textarea').forEach(function(i){i.disabled=on;});}
 function spend(el,label){
   el.classList.add('spent');lock(el,true);
@@ -440,7 +484,7 @@ async function resend(id){
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);setStatus('','your move');window.scrollTo(0,1e9);});
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);initRank(feed);setStatus('','your move');window.scrollTo(0,1e9);});
 es.addEventListener('status',function(e){const d=JSON.parse(e.data);setStatus(d.kind||'',d.text||'');});
 es.addEventListener('retract',function(e){const d=JSON.parse(e.data);feed.querySelectorAll('.batch').forEach(function(el){if(Number(el.dataset.batch)>d.from)el.remove();});setStatus('think','claude is thinking…');});
 es.addEventListener('finish',function(e){es.close();const eb=document.querySelector('.endbar');if(eb)eb.remove();setStatus('done','interview complete — you can close this tab.');});
