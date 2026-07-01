@@ -47,6 +47,20 @@ No account, no cloud, no dependencies. One file of Node, localhost only.
 | 📦 **Zero dependencies** | Pure Node built‑ins. One `.mjs` file. Localhost only. |
 | 🔌 **Skill or CLI** | Use it as a Claude Code skill, or run it standalone. |
 
+## ⚡ Try it in 5 seconds
+
+No install, no config — run the built-in demo straight from GitHub (needs Node ≥ 22):
+
+```sh
+npx github:rizzdev/rizzdev-detective --demo
+```
+
+It opens a sample interview in your browser — findings panel, pros/cons, yes/no pills, drag-to-rank, keyboard nav. Then point it at your own questions:
+
+```sh
+npx github:rizzdev/rizzdev-detective questions.json --out results.json
+```
+
 ## 🚀 Install (as a Claude Code skill)
 
 ```sh
@@ -145,8 +159,9 @@ No Claude required — it's just Node:
 
 ```sh
 node detective.mjs questions.json --out results.json
-# or, if installed from npm/link:
-npx rizzdev-detective questions.json --out results.json
+# or straight from GitHub, no clone:
+npx github:rizzdev/rizzdev-detective questions.json --out results.json
+npx github:rizzdev/rizzdev-detective --demo   # built-in sample
 ```
 
 It picks a free port, opens your browser (falls back to printing the URL), blocks until you submit, then writes/prints the results and exits.

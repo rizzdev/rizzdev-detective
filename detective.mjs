@@ -838,6 +838,7 @@ const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i 
 const SESSION_DEFAULT = `${tmpdir()}/rizzdev-detective-live.json`;
 
 const USAGE = `usage:
+  detective.mjs --demo                                    open a built-in sample interview
   detective.mjs <questions.json> [--out <results.json>]   one-shot form
   detective.mjs --live [--port N] [--out <file>]          start a live interview server
   detective.mjs push <batch.json> [--port N]              push a question batch into the live server
@@ -902,13 +903,55 @@ async function runLiveServer(args) {
   process.exit(0);
 }
 
+// A self-contained sample interview so `--demo` (and the npx one-liner) works
+// with zero setup — showcases findings, pros/cons, yes/no, multi, and rank.
+export const DEMO_QUESTIONS = {
+  title: 'rizzdev-detective — demo',
+  findings: {
+    summary: "A Claude Code skill that hands you a whole batch of questions at once — with pros/cons, a recommendation, and (in --live mode) adaptive follow-ups.\nKeyboard: j/k move · space select · 1-9 pick · ? for all keys.",
+    sources: [{ label: 'github.com/rizzdev/rizzdev-detective', ref: 'https://github.com/rizzdev/rizzdev-detective' }],
+  },
+  sections: [
+    { title: 'the basics', questions: [
+      { id: 'impression', text: 'First impression?', type: 'single',
+        recommendation: { optionId: 'love', why: 'the terminal look tends to win people over' },
+        options: [
+          { id: 'love', label: 'Love the terminal look', pro: 'ships', con: 'none' },
+          { id: 'fine', label: "It's fine", pro: 'honest', con: 'ouch' },
+          { id: 'no', label: 'Not for me', pro: 'fair', con: 'sad' },
+        ], allowOther: true },
+      { id: 'star', text: 'Star the repo?', type: 'yesno', recommendation: { optionId: 'yes', why: 'it genuinely helps' } },
+    ] },
+    { title: 'which features grab you? (multi)', questions: [
+      { id: 'features', text: 'Pick any', type: 'multi', options: [
+        { id: 'live', label: 'Live adaptive interviews' },
+        { id: 'rank', label: 'Drag-to-rank' },
+        { id: 'kbd', label: 'Keyboard-first' },
+        { id: 'research', label: 'Research + citations' },
+        { id: 'pushback', label: 'Push-back actions' },
+        { id: 'zerodep', label: 'Zero dependencies' },
+      ] },
+    ] },
+    { title: 'priorities', questions: [
+      { id: 'priorities', text: 'Rank what matters most to you (drag)', type: 'rank', priority: true, options: [
+        { id: 'fast', label: 'Fast' }, { id: 'clean', label: 'Clean UI' },
+        { id: 'flexible', label: 'Flexible' }, { id: 'simple', label: 'Simple' },
+      ] },
+    ] },
+  ],
+};
+
 async function runOneShot(args) {
-  const path = args.find((a) => !a.startsWith('--'));
   const outPath = argFlag(args, 'out');
-  if (!path) { console.error(USAGE); process.exit(2); }
   let questions;
-  try { questions = loadQuestions(path); }
-  catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
+  if (args.includes('--demo')) {
+    questions = normalizeQuestions(DEMO_QUESTIONS);
+  } else {
+    const path = args.find((a) => !a.startsWith('--'));
+    if (!path) { console.error(USAGE); process.exit(2); }
+    try { questions = loadQuestions(path); }
+    catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
+  }
   const results = await serve(questions, {
     onListen: (url) => {
       console.error(`\nrizzdev-detective ready → ${url}`);

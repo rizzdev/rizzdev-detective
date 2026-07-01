@@ -7,7 +7,14 @@ import {
   renderPage,
   renderBatchHtml,
   normalizeResults,
+  DEMO_QUESTIONS,
 } from '../detective.mjs';
+
+test('the built-in --demo questions are valid and render', () => {
+  const n = normalizeQuestions(DEMO_QUESTIONS);
+  assert.ok(n.sections.length >= 1);
+  assert.doesNotThrow(() => renderPage(n));
+});
 
 // --- validation / normalization / loading ---------------------------------
 
