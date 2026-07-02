@@ -425,6 +425,14 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 .question.working>h3::after{content:" · reworking…";color:var(--amb);font-weight:600;font-size:var(--fs-micro)}
 .batch.locked-rework .cont::after{content:" · finish reworking first";color:var(--amb);font-size:var(--fs-micro)}
 .qago{margin-inline-start:8px;font-size:var(--fs-micro);color:var(--amb);font-weight:400}
+.qbadge{display:flex;align-items:center;gap:8px;margin:6px 0 0 var(--indent);padding:5px 9px;border-radius:5px;font-size:var(--fs-micro);background:#1c1608;border:1px solid #5a4410}
+.qbadge.serious{background:#231010;border-color:#7a2626}
+.qbadge .btext{color:var(--amb);flex:1}
+.qbadge button{font:inherit;background:transparent;border:1px solid #3a4256;color:var(--tx3);padding:2px 8px;font-size:var(--fs-micro);cursor:pointer}
+.qbadge button:hover{border-color:var(--blu);color:var(--blu)}
+.auditbtn{display:none;margin:6px 0 0 auto;font:inherit;background:transparent;border:1px dashed #3a4256;color:var(--tx4);padding:3px 10px;font-size:var(--fs-micro);cursor:pointer}
+.auditbtn:hover{border-color:var(--amb);color:var(--amb)}
+body.audit-on .auditbtn{display:inline-block}
 .question.working .option,.question.working .pill,.question.working .rankrow{cursor:default;opacity:.7}
 .question.working .qactions{opacity:.35;pointer-events:none}
 .qworking{display:flex;align-items:center;gap:7px;margin:8px 0 0 var(--indent);color:var(--amb);font-size:var(--fs-micro);font-weight:600}
@@ -785,7 +793,19 @@ feed.addEventListener('keydown',function(e){
 });
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');if(nb)nb.scrollIntoView({block:'start'});});
+function batchOtherText(el){
+  var parts=[];
+  el.querySelectorAll('.other').forEach(function(o){if(o.value.trim())parts.push(o.value.trim());});
+  el.querySelectorAll('.ownchip').forEach(function(c){if(c.textContent.trim())parts.push(c.textContent.trim());});
+  return parts.join(' | ');
+}
+function addAudit(b){
+  if(!b||b.querySelector('.auditbtn'))return;
+  var btn=document.createElement('button');btn.type='button';btn.className='auditbtn';btn.textContent='⚙ audit this';
+  btn.onclick=function(){post('/signal',{batch:Number(b.dataset.batch),kind:'audit',other:batchOtherText(b)});showToast('audit requested — claude is reviewing','');setStatus('think','claude is auditing…');};
+  b.appendChild(btn);
+}
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);addAudit(nb);setStatus('','your move');if(nb)nb.scrollIntoView({block:'start'});});
 es.addEventListener('qupdate',function(e){
   const d=JSON.parse(e.data);
   const old=feed.querySelector('.question[data-qid="'+d.qid+'"]');
@@ -799,6 +819,18 @@ es.addEventListener('qupdate',function(e){
   refreshSubmitLock();
   showToast('question updated ✓','good');
   setStatus('','your move');
+});
+es.addEventListener('annotate',function(e){
+  const d=JSON.parse(e.data);
+  const q=feed.querySelector('.question[data-qid="'+d.qid+'"]');if(!q)return;
+  const b=document.createElement('div');b.className='qbadge '+(d.level==='serious'?'serious':'warn');
+  const msg=document.createElement('span');msg.className='btext';msg.textContent='⚠ '+d.text;
+  const dis=document.createElement('button');dis.type='button';dis.className='bdismiss';dis.textContent='dismiss';
+  const ask=document.createElement('button');ask.type='button';ask.className='baskme';ask.textContent='ask me';
+  dis.onclick=function(){b.remove();};
+  ask.onclick=function(){post('/signal',{batch:batchOf(q),qid:d.qid,kind:'askme',note:d.text,other:''});b.remove();};
+  b.appendChild(msg);b.appendChild(dis);b.appendChild(ask);
+  q.appendChild(b);stampUpdated(q);showToast('audit note added','');
 });
 es.addEventListener('status',function(e){const d=JSON.parse(e.data);setStatus(d.kind||'',d.text||'');});
 es.addEventListener('retract',function(e){const d=JSON.parse(e.data);feed.querySelectorAll('.batch').forEach(function(el){if(Number(el.dataset.batch)>d.from)el.remove();});setStatus('think','claude is thinking…');});
@@ -1000,6 +1032,16 @@ export function serveLive(opts = {}) {
           broadcast('qupdate', { qid, html });
           broadcast('status', { kind: '', text: 'your move' });
           json(200, { ok: true, qid });
+        });
+        return;
+      }
+      if (req.method === 'POST' && p === '/ctl/annotate') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          if (!d.qid || typeof d.text !== 'string') { json(400, { error: 'annotate needs { qid, text, level? }' }); return; }
+          // Non-destructive: a badge on the question, NOT a replace — keeps the answer.
+          broadcast('annotate', { qid: d.qid, level: d.level === 'serious' ? 'serious' : 'warn', text: d.text });
+          json(200, { ok: true });
         });
         return;
       }
