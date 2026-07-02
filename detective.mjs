@@ -272,6 +272,15 @@ body{margin:0;background:#05070b;color:var(--tx2);font:var(--fs-body)/1.4 "JetBr
 .titlebar .dot{width:11px;height:11px;border-radius:50%;box-shadow:inset 0 0 1px rgba(0,0,0,.5),inset 0 1px 1px rgba(255,255,255,.14)}
 .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
 .titlebar .tt{margin-left:8px;color:var(--tx4);font-size:var(--fs-micro)}
+#gear{margin-inline-start:auto;background:transparent;border:0;color:var(--tx4);font-size:1rem;cursor:pointer;line-height:1}
+#gear:hover{color:var(--tx2)}
+.settings{padding:12px 16px;background:#0b0f16;border-bottom:1px solid #1a2230;display:flex;flex-direction:column;gap:8px}
+.settings label{display:flex;align-items:center;gap:8px;color:var(--tx3);font-size:var(--fs-meta)}
+.settings .ctxrow{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.settings textarea{background:#080b11;border:1px solid #222a3a;color:var(--tx2);font:inherit;font-size:var(--fs-meta);padding:6px 9px;resize:vertical}
+.setbtns{display:flex;align-items:center;gap:10px}
+.setbtns button{font:inherit;background:#0f1c13;color:var(--grn);border:1px solid #2c8f45;padding:4px 12px;font-size:var(--fs-micro);font-weight:700;cursor:pointer}
+#setmsg{color:var(--grn);font-size:var(--fs-micro)}
 .screen{padding:20px}
 
 .prompt{color:var(--tx4);font-size:var(--fs-meta);padding:0;margin:0}
@@ -581,7 +590,15 @@ function renderLiveShell() {
 <style>${STYLES}</style></head>
 <body>
 <div class="wrap">
-  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective --live</span></div>
+  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective --live</span><button type="button" id="gear" title="settings" onclick="toggleSettings()">⚙</button></div>
+  <div class="settings" id="settings" hidden>
+    <label><input type="checkbox" id="cfg-requireHints"> require a hint on every question &amp; option</label>
+    <label><input type="checkbox" id="cfg-forceVisual"> force a visual/diagram per question</label>
+    <label><input type="checkbox" id="cfg-auditAsYouGo"> enable "audit this" (token-heavy — spawns subagents)</label>
+    <div class="ctxrow"><label for="cfg-context">context (highest-priority guidance for claude)</label>
+      <textarea id="cfg-context" rows="5" placeholder="e.g. always prefer the cheapest option…"></textarea></div>
+    <div class="setbtns"><button type="button" onclick="saveSettings()">save settings</button><span id="setmsg"></span></div>
+  </div>
   <div class="screen">
     <div id="feed"></div>
     <div class="statusline" id="status"><span class="dotp"></span><span id="stext">connecting…</span></div>
@@ -705,6 +722,42 @@ async function resend(id){
   await post('/answer',{batch:Number(id),answers:answers,revised:true});
 }
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
+// Settings panel: load config + context, toggle, save. Audit is token-heavy so
+// enabling it asks for confirmation first.
+function applyAuditClass(on){document.body.classList.toggle('audit-on',!!on);}
+async function toggleSettings(){
+  var el=document.getElementById('settings');
+  if(!el.hidden){el.hidden=true;return;}
+  try{
+    var cfg=await (await fetch('/ctl/config')).json();
+    document.getElementById('cfg-requireHints').checked=!!cfg.requireHints;
+    document.getElementById('cfg-forceVisual').checked=!!cfg.forceVisual;
+    document.getElementById('cfg-auditAsYouGo').checked=!!cfg.auditAsYouGo;
+    var ctx=await (await fetch('/ctl/context')).json();
+    document.getElementById('cfg-context').value=ctx.text||'';
+  }catch(e){}
+  el.hidden=false;
+}
+document.addEventListener('change',function(e){
+  if(e.target&&e.target.id==='cfg-auditAsYouGo'&&e.target.checked){
+    if(!confirm('Audits spawn Sonnet-5 subagents and are token-heavy. Enable?'))e.target.checked=false;
+  }
+});
+async function saveSettings(){
+  var patch={
+    requireHints:document.getElementById('cfg-requireHints').checked,
+    forceVisual:document.getElementById('cfg-forceVisual').checked,
+    auditAsYouGo:document.getElementById('cfg-auditAsYouGo').checked,
+  };
+  try{
+    await post('/config',patch);
+    await post('/context',{text:document.getElementById('cfg-context').value});
+    applyAuditClass(patch.auditAsYouGo);
+    var m=document.getElementById('setmsg');if(m){m.textContent='saved ✓';setTimeout(function(){m.textContent='';},2000);}
+  }catch(e){}
+}
+// Reflect current audit setting on load so the per-batch audit button shows/hides.
+fetch('/ctl/config').then(function(r){return r.json();}).then(function(c){applyAuditClass(c&&c.auditAsYouGo);}).catch(function(){});
 // "Updated Xs ago" badge on reworked/annotated questions, ticked once a second.
 function nowMs(){return (window.performance&&performance.timeOrigin)?performance.timeOrigin+performance.now():+new Date();}
 function stampUpdated(q){
@@ -987,6 +1040,15 @@ export function serveLive(opts = {}) {
         return;
       }
       if (req.method === 'GET' && p === '/ctl/config') { json(200, state.config); return; }
+      if (req.method === 'GET' && p === '/ctl/context') { json(200, { text: loadContext() }); return; }
+      if (req.method === 'POST' && p === '/context') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          saveContext(d.text);
+          json(200, { ok: true });
+        });
+        return;
+      }
       if (req.method === 'POST' && p === '/ctl/finish') {
         readBody(req).then((body) => {
           let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
@@ -1041,6 +1103,13 @@ export function saveConfig(patch) {
   try { mkdirSync(configPath().replace(/\/[^/]+$/, ''), { recursive: true }); } catch {}
   writeFileSync(configPath(), JSON.stringify(next, null, 2));
   return next;
+}
+export function contextPath() { return configPath().replace(/config\.json$/, 'context.md'); }
+export function loadContext() { try { return readFileSync(contextPath(), 'utf8'); } catch { return ''; } }
+export function saveContext(text) {
+  try { mkdirSync(contextPath().replace(/\/[^/]+$/, ''), { recursive: true }); } catch {}
+  writeFileSync(contextPath(), typeof text === 'string' ? text : '');
+  return loadContext();
 }
 
 // Is the session file pointing at a server that's actually up? Used to hard-block
