@@ -381,6 +381,7 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 /* a single question locked while claude reworks it (in place, no reload) */
 .question.working{box-shadow:inset 2px 0 0 var(--amb)}
 .question.working>h3::after{content:" · reworking…";color:var(--amb);font-weight:600;font-size:var(--fs-micro)}
+.batch.locked-rework .cont::after{content:" · finish reworking first";color:var(--amb);font-size:var(--fs-micro)}
 .question.working .option,.question.working .pill,.question.working .rankrow{cursor:default;opacity:.7}
 .question.working .qactions{opacity:.35;pointer-events:none}
 .qworking{display:flex;align-items:center;gap:7px;margin:8px 0 0 var(--indent);color:var(--amb);font-size:var(--fs-micro);font-weight:600}
@@ -593,6 +594,14 @@ function addActions(scope){
     q.appendChild(bar);
   });
 }
+function refreshSubmitLock(){
+  feed.querySelectorAll('.batch').forEach(function(b){
+    var working=b.querySelector('.question.working');
+    var cont=b.querySelector('.cont button:not(.revise)');
+    if(cont)cont.disabled=!!working;
+    b.classList.toggle('locked-rework',!!working);
+  });
+}
 function lockQuestion(q,on){
   q.classList.toggle('working',on);
   q.querySelectorAll('input,textarea').forEach(function(i){i.disabled=on;});
@@ -601,6 +610,7 @@ function lockQuestion(q,on){
     if(!badge){badge=document.createElement('div');badge.className='qworking';badge.innerHTML='<span class="dotp"></span>claude is reworking this question…';
       var acts=q.querySelector('.qactions');if(acts)q.insertBefore(badge,acts);else q.appendChild(badge);}
   }else if(badge){badge.remove();}
+  refreshSubmitLock();
 }
 function doAction(q,kind){
   if(!q)return;
@@ -661,7 +671,7 @@ async function resend(id){
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');window.scrollTo(0,1e9);});
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');if(nb)nb.scrollIntoView({block:'start'});});
 es.addEventListener('qupdate',function(e){
   const d=JSON.parse(e.data);
   const old=feed.querySelector('.question[data-qid="'+d.qid+'"]');
@@ -672,6 +682,7 @@ es.addEventListener('qupdate',function(e){
   const fresh=feed.querySelector('.question[data-qid="'+d.qid+'"]');
   if(batch){initRank(batch);addActions(batch);}
   if(fresh){fresh.classList.add('qflash');}
+  refreshSubmitLock();
   showToast('question updated ✓','good');
   setStatus('','your move');
 });

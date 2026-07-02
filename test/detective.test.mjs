@@ -28,6 +28,17 @@ test('batch handler dedupes an already-rendered batch id', () => {
   assert.ok(m, 'batch handler present');
   assert.match(m[1], /\.batch\[data-batch="/);
 });
+
+test('new batch scrolls to its top, not the page bottom', () => {
+  const shell = renderLiveShellForTest();
+  assert.doesNotMatch(shell, /scrollTo\(0,1e9\)/);
+  assert.match(shell, /addEventListener\('batch'[\s\S]*?scrollIntoView\(\{block:'start'\}\)/);
+});
+
+test('a reworking batch disables its continue button', () => {
+  const shell = renderLiveShellForTest();
+  assert.match(shell, /function refreshSubmitLock/);
+});
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
