@@ -40,6 +40,12 @@ test('a reworking batch disables its continue button', () => {
   assert.match(shell, /function refreshSubmitLock/);
 });
 
+test('live shell renders a relative-time updater', () => {
+  const shell = renderLiveShellForTest();
+  assert.match(shell, /qago/);
+  assert.match(shell, /setInterval/);
+});
+
 test('normalizeResults keeps other as array for multi, string for single', () => {
   const q = normalizeQuestions({ questions: [
     { id: 'm', text: 'M', type: 'multi', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },

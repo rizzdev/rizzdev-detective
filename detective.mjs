@@ -391,6 +391,7 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 .question.working{box-shadow:inset 2px 0 0 var(--amb)}
 .question.working>h3::after{content:" · reworking…";color:var(--amb);font-weight:600;font-size:var(--fs-micro)}
 .batch.locked-rework .cont::after{content:" · finish reworking first";color:var(--amb);font-size:var(--fs-micro)}
+.qago{margin-inline-start:8px;font-size:var(--fs-micro);color:var(--amb);font-weight:400}
 .question.working .option,.question.working .pill,.question.working .rankrow{cursor:default;opacity:.7}
 .question.working .qactions{opacity:.35;pointer-events:none}
 .qworking{display:flex;align-items:center;gap:7px;margin:8px 0 0 var(--indent);color:var(--amb);font-size:var(--fs-micro);font-weight:600}
@@ -680,6 +681,21 @@ async function resend(id){
   await post('/answer',{batch:Number(id),answers:answers,revised:true});
 }
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
+// "Updated Xs ago" badge on reworked/annotated questions, ticked once a second.
+function nowMs(){return (window.performance&&performance.timeOrigin)?performance.timeOrigin+performance.now():+new Date();}
+function stampUpdated(q){
+  if(!q)return;q.dataset.updated=String(nowMs());
+  var h=q.querySelector('h3');if(!h)return;
+  var b=q.querySelector('.qago');if(!b){b=document.createElement('span');b.className='qago';h.appendChild(b);}
+  paintAgo(q);
+}
+function paintAgo(q){
+  var t=Number(q.dataset.updated);if(!t)return;
+  var s=Math.max(0,Math.round((nowMs()-t)/1000));
+  var txt=s<5?'updated just now':(s<60?('updated '+s+'s ago'):('updated '+Math.round(s/60)+'m ago'));
+  var b=q.querySelector('.qago');if(b)b.textContent=txt;
+}
+setInterval(function(){feed.querySelectorAll('.question[data-updated]').forEach(paintAgo);},1000);
 // Multi-select "add your own": Enter appends a chip (add-only, no dedupe).
 feed.addEventListener('keydown',function(e){
   if(e.key!=='Enter'||!e.target||!e.target.classList.contains('ownadd'))return;
@@ -702,7 +718,7 @@ es.addEventListener('qupdate',function(e){
   old.remove();
   const fresh=feed.querySelector('.question[data-qid="'+d.qid+'"]');
   if(batch){initRank(batch);addActions(batch);}
-  if(fresh){fresh.classList.add('qflash');}
+  if(fresh){fresh.classList.add('qflash');stampUpdated(fresh);}
   refreshSubmitLock();
   showToast('question updated ✓','good');
   setStatus('','your move');
