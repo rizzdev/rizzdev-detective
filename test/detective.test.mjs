@@ -10,7 +10,120 @@ import {
   replaceQuestionHtml,
   normalizeResults,
   DEMO_QUESTIONS,
+  PKG_NAME,
+  isSessionLive,
+  renderLiveShellForTest,
 } from '../detective.mjs';
+
+test('qupdate handler flashes in place without scrolling', () => {
+  const shell = renderLiveShellForTest();
+  const m = shell.match(/addEventListener\('qupdate',function\(e\)\{([\s\S]*?)\}\);/);
+  assert.ok(m, 'qupdate handler present');
+  assert.doesNotMatch(m[1], /scrollIntoView/);
+});
+
+test('batch handler dedupes an already-rendered batch id', () => {
+  const shell = renderLiveShellForTest();
+  const m = shell.match(/addEventListener\('batch',function\(e\)\{([\s\S]*?)\}\);/);
+  assert.ok(m, 'batch handler present');
+  assert.match(m[1], /\.batch\[data-batch="/);
+});
+
+test('new batch scrolls to its top, not the page bottom', () => {
+  const shell = renderLiveShellForTest();
+  assert.doesNotMatch(shell, /scrollTo\(0,1e9\)/);
+  assert.match(shell, /addEventListener\('batch'[\s\S]*?scrollIntoView\(\{block:'start'\}\)/);
+});
+
+test('a reworking batch disables its continue button', () => {
+  const shell = renderLiveShellForTest();
+  assert.match(shell, /function refreshSubmitLock/);
+});
+
+test('requireHints demands a why and per-option hint', () => {
+  const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
+  assert.throws(() => validateQuestions(doc, { requireHints: true }), /why|hint/i);
+});
+
+test('requireHints passes when why and pro present', () => {
+  const doc = { questions: [{ id: 'q', text: 't', why: 'because', options: [{ id: 'a', label: 'A', pro: 'fast' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { requireHints: true }));
+});
+
+test('requireHints accepts a hint field as the per-option hint', () => {
+  const doc = { questions: [{ id: 'q', text: 't', why: 'because', options: [{ id: 'a', label: 'A', hint: 'note' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { requireHints: true }));
+});
+
+test('validateQuestions with no opts is unchanged', () => {
+  const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc));
+});
+
+test('forceVisual requires a visual on single/multi', () => {
+  const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
+  assert.throws(() => validateQuestions(doc, { forceVisual: true }), /visual/i);
+});
+
+test('forceVisual accepts an explicit visual:false opt-out', () => {
+  const doc = { questions: [{ id: 'q', text: 't', visual: false, options: [{ id: 'a', label: 'A' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { forceVisual: true }));
+});
+
+test('forceVisual exempts yesno', () => {
+  const doc = { questions: [{ id: 'q', text: 't', type: 'yesno' }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { forceVisual: true }));
+});
+
+test('renderQuestion shows a visual block', () => {
+  const n = normalizeQuestions({ questions: [{ id: 'q', text: 't', visual: '<svg width="1"></svg>', options: [{ id: 'a', label: 'A' }] }] });
+  assert.match(renderQuestionHtml(n.sections[0].questions[0], 'q'), /class="visual"/);
+});
+
+test('live shell renders a relative-time updater', () => {
+  const shell = renderLiveShellForTest();
+  assert.match(shell, /qago/);
+  assert.match(shell, /setInterval/);
+});
+
+test('normalizeResults keeps other as array for multi, string for single', () => {
+  const q = normalizeQuestions({ questions: [
+    { id: 'm', text: 'M', type: 'multi', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+    { id: 's', text: 'S', type: 'single', options: [{ id: 'x', label: 'X' }] },
+  ] });
+  const out = normalizeResults({ answers: {
+    m: { selected: ['a'], other: ['SAML', 'magic link'] },
+    s: { selected: ['x'], other: 'note' },
+  } }, q);
+  assert.deepEqual(out.answers.m.other, ['SAML', 'magic link']);
+  assert.equal(out.answers.s.other, 'note');
+});
+
+test('normalizeResults coerces a stray string other on multi to a one-item array', () => {
+  const q = normalizeQuestions({ questions: [
+    { id: 'm', text: 'M', type: 'multi', options: [{ id: 'a', label: 'A' }] },
+  ] });
+  const out = normalizeResults({ answers: { m: { selected: [], other: 'lone' } } }, q);
+  assert.deepEqual(out.answers.m.other, ['lone']);
+});
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+
+test('package identity is claude-detective', () => {
+  assert.equal(PKG_NAME, 'claude-detective');
+});
+
+test('isSessionLive reports not-live for a stale pid', async () => {
+  const p = `${tmpdir()}/cd-test-stale.json`;
+  writeFileSync(p, JSON.stringify({ port: 59999, url: 'http://127.0.0.1:59999/', pid: 2 ** 30 }));
+  const r = await isSessionLive(p);
+  assert.equal(r.live, false);
+});
+
+test('isSessionLive reports not-live when file is missing', async () => {
+  const r = await isSessionLive(`${tmpdir()}/cd-test-missing-${Math.floor(performance.now())}.json`);
+  assert.equal(r.live, false);
+});
 
 test('the built-in --demo questions are valid and render', () => {
   const n = normalizeQuestions(DEMO_QUESTIONS);
@@ -358,7 +471,7 @@ const two = normalizeQuestions({ questions: [
 test('normalizeResults fills every question and passes globalNote + submittedAt', () => {
   const r = normalizeResults({ answers: { q1: { selected: ['a'], other: '' } }, globalNote: 'hi' }, two, '2026-07-01T00:00:00.000Z');
   assert.deepEqual(r.answers.q1, { selected: ['a'], other: '' });
-  assert.deepEqual(r.answers.q2, { selected: [], other: '' });
+  assert.deepEqual(r.answers.q2, { selected: [], other: [] }); // multi → other is a string[]
   assert.equal(r.globalNote, 'hi');
   assert.equal(r.submittedAt, '2026-07-01T00:00:00.000Z');
 });
@@ -371,7 +484,7 @@ test('normalizeResults trims single-type to at most one selection', () => {
 test('normalizeResults keeps multiple selections for multi-type and preserves other text', () => {
   const r = normalizeResults({ answers: { q2: { selected: ['x', 'y'], other: 'z' } } }, two, 'T');
   assert.deepEqual(r.answers.q2.selected, ['x', 'y']);
-  assert.equal(r.answers.q2.other, 'z');
+  assert.deepEqual(r.answers.q2.other, ['z']); // multi → other coerced to a string[]
 });
 
 test('normalizeResults tolerates a completely empty payload', () => {

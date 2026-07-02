@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync, mkdirSync } from 'node:fs';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 // Input handling: validate, normalize, load
 // ---------------------------------------------------------------------------
 
-export function validateQuestions(doc) {
+export function validateQuestions(doc, opts = {}) {
   if (!doc || typeof doc !== 'object') throw new Error('questions JSON must be an object');
   const hasSections = Array.isArray(doc.sections);
   const hasFlat = Array.isArray(doc.questions);
@@ -41,13 +41,27 @@ export function validateQuestions(doc) {
           if (typeof o.label !== 'string' || !o.label) throw new Error(`question ${q.id} option ${o.id} needs "label"`);
         }
       }
+      if (opts.requireHints) {
+        if (typeof q.why !== 'string' || !q.why) throw new Error(`question ${q.id} needs a "why" (requireHints)`);
+        if (q.type !== 'yesno' && Array.isArray(q.options)) {
+          for (const o of q.options) {
+            if (!o.pro && !o.hint) throw new Error(`question ${q.id} option ${o.id} needs a "pro" or "hint" (requireHints)`);
+          }
+        }
+      }
+      if (opts.forceVisual && (q.type === undefined || q.type === 'single' || q.type === 'multi')) {
+        const hasVisual = typeof q.visual === 'string' && q.visual.trim() !== '';
+        if (!hasVisual && q.visual !== false) {
+          throw new Error(`question ${q.id} needs a "visual" (forceVisual) — set visual:false only if a diagram truly adds nothing`);
+        }
+      }
     }
   }
   return doc;
 }
 
-export function normalizeQuestions(doc) {
-  validateQuestions(doc);
+export function normalizeQuestions(doc, opts = {}) {
+  validateQuestions(doc, opts);
   const rawSections = Array.isArray(doc.sections)
     ? doc.sections
     : [{ title: undefined, questions: doc.questions }];
@@ -59,11 +73,12 @@ export function normalizeQuestions(doc) {
       const rawOptions = Array.isArray(q.options) && q.options.length ? q.options : null;
       const options = isYesNo && !rawOptions
         ? [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
-        : rawOptions.map((o) => ({ id: o.id, label: o.label, pro: o.pro, con: o.con }));
+        : rawOptions.map((o) => ({ id: o.id, label: o.label, pro: o.pro, con: o.con, hint: o.hint }));
       return {
         id: q.id,
         text: q.text,
         why: typeof q.why === 'string' ? q.why : undefined,
+        visual: typeof q.visual === 'string' ? q.visual : (q.visual === false ? false : undefined),
         // `type` drives result semantics; `render` drives the layout.
         // yesno → single-select semantics; rank → its own ordered semantics.
         type: isRank ? 'rank' : q.type === 'multi' ? 'multi' : 'single',
@@ -164,13 +179,14 @@ function renderOption(q, o) {
   const recommended = q.recommendation && q.recommendation.optionId === o.id;
   const pro = o.pro ? `<div class="pro">${fmt(o.pro)}</div>` : '';
   const con = o.con ? `<div class="con">${fmt(o.con)}</div>` : '';
+  const hint = !o.pro && !o.con && o.hint ? `<div class="ohint">${fmt(o.hint)}</div>` : '';
   const star = recommended ? ' <span class="rec-star">★ recommended</span>' : '';
   return `
     <label class="option${recommended ? ' recommended' : ''}">
       <input type="${inputType}" name="q__${esc(q.id)}" data-qid="${esc(q.id)}" value="${esc(o.id)}">
       <div class="option-body">
         <div class="option-label">${esc(o.label)}${star}</div>
-        ${pro}${con}
+        ${pro}${con}${hint}
       </div>
     </label>`;
 }
@@ -194,7 +210,11 @@ function renderQuestion(q) {
   const rec = q.recommendation && q.recommendation.why
     ? `<div class="rec">${fmt(q.recommendation.why)}</div>` : '';
   const other = q.allowOther
-    ? `<input type="text" class="other" id="other__${esc(q.id)}" placeholder="Other / add nuance…">` : '';
+    ? (q.type === 'multi'
+        ? `<div class="ownwrap" data-qid="${esc(q.id)}"><div class="ownchips"></div>`
+          + `<input type="text" class="ownadd" placeholder="Add your own… (Enter)"></div>`
+        : `<input type="text" class="other" id="other__${esc(q.id)}" placeholder="Other / add nuance…">`)
+    : '';
   // A long list of short, pro/con-free options flows into two columns.
   const shortEnough = q.options.every((o) => !o.pro && !o.con && String(o.label).length <= 28);
   const twoCol = q.render === 'list' && q.options.length >= 6 && shortEnough;
@@ -204,11 +224,15 @@ function renderQuestion(q) {
       ? renderRankItems(q)
       : `<div class="options${twoCol ? ' two-col' : ''}">${q.options.map((o) => renderOption(q, o)).join('')}</div>`;
   const recAttr = q.recommendation && q.recommendation.optionId ? ` data-rec="${esc(q.recommendation.optionId)}"` : '';
+  const visual = (typeof q.visual === 'string' && q.visual.trim())
+    ? `<div class="visual">${/^\s*<svg[\s>]/i.test(q.visual) ? q.visual : `<pre>${esc(q.visual)}</pre>`}</div>`
+    : '';
   return `
     <section class="question" data-qid="${esc(q.id)}"${recAttr}>
       <h3>${esc(q.text)}</h3>
       ${why}
       ${rec}
+      ${visual}
       ${controls}
       ${other}
     </section>`;
@@ -248,6 +272,15 @@ body{margin:0;background:#05070b;color:var(--tx2);font:var(--fs-body)/1.4 "JetBr
 .titlebar .dot{width:11px;height:11px;border-radius:50%;box-shadow:inset 0 0 1px rgba(0,0,0,.5),inset 0 1px 1px rgba(255,255,255,.14)}
 .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
 .titlebar .tt{margin-left:8px;color:var(--tx4);font-size:var(--fs-micro)}
+#gear{margin-inline-start:auto;background:transparent;border:0;color:var(--tx4);font-size:1rem;cursor:pointer;line-height:1}
+#gear:hover{color:var(--tx2)}
+.settings{padding:12px 16px;background:#0b0f16;border-bottom:1px solid #1a2230;display:flex;flex-direction:column;gap:8px}
+.settings label{display:flex;align-items:center;gap:8px;color:var(--tx3);font-size:var(--fs-meta)}
+.settings .ctxrow{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.settings textarea{background:#080b11;border:1px solid #222a3a;color:var(--tx2);font:inherit;font-size:var(--fs-meta);padding:6px 9px;resize:vertical}
+.setbtns{display:flex;align-items:center;gap:10px}
+.setbtns button{font:inherit;background:#0f1c13;color:var(--grn);border:1px solid #2c8f45;padding:4px 12px;font-size:var(--fs-micro);font-weight:700;cursor:pointer}
+#setmsg{color:var(--grn);font-size:var(--fs-micro)}
 .screen{padding:20px}
 
 .prompt{color:var(--tx4);font-size:var(--fs-meta);padding:0;margin:0}
@@ -300,6 +333,10 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .pro,.con{padding-left:0;font-size:var(--fs-micro);margin-top:1px}
 .pro{color:var(--grn2)}.pro::before{content:"+ ";font-weight:700}
 .con{color:var(--red)}.con::before{content:"- ";font-weight:700}
+.ohint{padding-left:0;font-size:var(--fs-micro);margin-top:1px;color:var(--tx4)}
+.visual{margin:8px 0;padding:8px;border:1px solid #222a3a;border-radius:6px;overflow:auto}
+.visual pre{margin:0;white-space:pre;font-size:var(--fs-micro);color:var(--tx3)}
+.visual svg{max-width:100%;height:auto}
 
 /* drag-to-rank */
 .rank{list-style:none;counter-reset:rk;margin:2px 0 0;padding-left:0;display:flex;flex-direction:column;gap:2px}
@@ -325,6 +362,11 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 
 .other{width:calc(100% - var(--indent));margin:6px 0 0 var(--indent);background:#080b11;border:1px solid #222a3a;color:var(--tx2);padding:5px 9px;font:inherit;font-size:var(--fs-meta)}
 .other::placeholder,textarea#__global::placeholder{color:var(--tx4)}
+.ownwrap{margin:6px 0 0 var(--indent)}
+.ownadd{width:calc(100% - var(--indent));background:#080b11;border:1px solid #222a3a;color:var(--tx2);padding:5px 9px;font:inherit;font-size:var(--fs-meta)}
+.ownadd::placeholder{color:var(--tx4)}
+.ownchips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
+.ownchip{background:#0f1c13;border:1px solid #2c8f45;color:var(--grn);padding:2px 8px;border-radius:10px;font-size:var(--fs-micro)}
 .other:focus,textarea#__global:focus{outline:0;border-color:var(--blu);box-shadow:0 0 0 1px rgba(108,182,255,.35)}
 
 /* global note = its own panel */
@@ -381,6 +423,16 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 /* a single question locked while claude reworks it (in place, no reload) */
 .question.working{box-shadow:inset 2px 0 0 var(--amb)}
 .question.working>h3::after{content:" · reworking…";color:var(--amb);font-weight:600;font-size:var(--fs-micro)}
+.batch.locked-rework .cont::after{content:" · finish reworking first";color:var(--amb);font-size:var(--fs-micro)}
+.qago{margin-inline-start:8px;font-size:var(--fs-micro);color:var(--amb);font-weight:400}
+.qbadge{display:flex;align-items:center;gap:8px;margin:6px 0 0 var(--indent);padding:5px 9px;border-radius:5px;font-size:var(--fs-micro);background:#1c1608;border:1px solid #5a4410}
+.qbadge.serious{background:#231010;border-color:#7a2626}
+.qbadge .btext{color:var(--amb);flex:1}
+.qbadge button{font:inherit;background:transparent;border:1px solid #3a4256;color:var(--tx3);padding:2px 8px;font-size:var(--fs-micro);cursor:pointer}
+.qbadge button:hover{border-color:var(--blu);color:var(--blu)}
+.auditbtn{display:none;margin:6px 0 0 auto;font:inherit;background:transparent;border:1px dashed #3a4256;color:var(--tx4);padding:3px 10px;font-size:var(--fs-micro);cursor:pointer}
+.auditbtn:hover{border-color:var(--amb);color:var(--amb)}
+body.audit-on .auditbtn{display:inline-block}
 .question.working .option,.question.working .pill,.question.working .rankrow{cursor:default;opacity:.7}
 .question.working .qactions{opacity:.35;pointer-events:none}
 .qworking{display:flex;align-items:center;gap:7px;margin:8px 0 0 var(--indent);color:var(--amb);font-size:var(--fs-micro);font-weight:600}
@@ -453,7 +505,7 @@ const NAV_JS = `
 })();`;
 
 export function renderPage(questions) {
-  const title = questions.title ? esc(questions.title) : 'rizzdev-detective';
+  const title = questions.title ? esc(questions.title) : 'claude-detective';
   const cols = sectionColors(questions.sections.length);
   const body = renderFindings(questions.findings) + questions.sections.map((s, i) => renderSection(s, cols[i])).join('');
   const dataIsland = JSON.stringify(questions).replace(/</g, '\\u003c');
@@ -464,7 +516,7 @@ export function renderPage(questions) {
 <style>${STYLES}</style></head>
 <body>
 <div class="wrap">
-  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">rizzdev@detective: ./detective</span></div>
+  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective</span></div>
   <div class="screen">
     <h1>${title}</h1>
     ${body}
@@ -542,11 +594,19 @@ function renderLiveShell() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rizzdev-detective — live</title>
+<title>claude-detective — live</title>
 <style>${STYLES}</style></head>
 <body>
 <div class="wrap">
-  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">rizzdev@detective: ./detective --live</span></div>
+  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective --live</span><button type="button" id="gear" title="settings" onclick="toggleSettings()">⚙</button></div>
+  <div class="settings" id="settings" hidden>
+    <label><input type="checkbox" id="cfg-requireHints"> require a hint on every question &amp; option</label>
+    <label><input type="checkbox" id="cfg-forceVisual"> force a visual/diagram per question</label>
+    <label><input type="checkbox" id="cfg-auditAsYouGo"> enable "audit this" (token-heavy — spawns subagents)</label>
+    <div class="ctxrow"><label for="cfg-context">context (highest-priority guidance for claude)</label>
+      <textarea id="cfg-context" rows="5" placeholder="e.g. always prefer the cheapest option…"></textarea></div>
+    <div class="setbtns"><button type="button" onclick="saveSettings()">save settings</button><span id="setmsg"></span></div>
+  </div>
   <div class="screen">
     <div id="feed"></div>
     <div class="statusline" id="status"><span class="dotp"></span><span id="stext">connecting…</span></div>
@@ -575,9 +635,11 @@ function collect(id){
     const rank=el.querySelector('.rank[data-qid="'+qid+'"]');
     const sel=rank?[...rank.querySelectorAll('.rankrow')].map(r=>r.dataset.oid)
                   :[...el.querySelectorAll('input[data-qid="'+qid+'"]:checked')].map(i=>i.value);
+    const own=el.querySelector('.ownwrap[data-qid="'+qid+'"]');
     const o=el.querySelector('[id="other__'+qid+'"]');
+    const other=own?[].slice.call(own.querySelectorAll('.ownchip')).map(c=>c.textContent):(o?o.value:'');
     const q=el.querySelector('.question[data-qid="'+qid+'"]');
-    ans[qid]={selected:sel,other:o?o.value:'',delegated:!!(q&&q.classList.contains('delegated'))};
+    ans[qid]={selected:sel,other:other,delegated:!!(q&&q.classList.contains('delegated'))};
   });
   return ans;
 }
@@ -593,6 +655,14 @@ function addActions(scope){
     q.appendChild(bar);
   });
 }
+function refreshSubmitLock(){
+  feed.querySelectorAll('.batch').forEach(function(b){
+    var working=b.querySelector('.question.working');
+    var cont=b.querySelector('.cont button:not(.revise)');
+    if(cont)cont.disabled=!!working;
+    b.classList.toggle('locked-rework',!!working);
+  });
+}
 function lockQuestion(q,on){
   q.classList.toggle('working',on);
   q.querySelectorAll('input,textarea').forEach(function(i){i.disabled=on;});
@@ -601,6 +671,7 @@ function lockQuestion(q,on){
     if(!badge){badge=document.createElement('div');badge.className='qworking';badge.innerHTML='<span class="dotp"></span>claude is reworking this question…';
       var acts=q.querySelector('.qactions');if(acts)q.insertBefore(badge,acts);else q.appendChild(badge);}
   }else if(badge){badge.remove();}
+  refreshSubmitLock();
 }
 function doAction(q,kind){
   if(!q)return;
@@ -659,9 +730,82 @@ async function resend(id){
   await post('/answer',{batch:Number(id),answers:answers,revised:true});
 }
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
+// Settings panel: load config + context, toggle, save. Audit is token-heavy so
+// enabling it asks for confirmation first.
+function applyAuditClass(on){document.body.classList.toggle('audit-on',!!on);}
+async function toggleSettings(){
+  var el=document.getElementById('settings');
+  if(!el.hidden){el.hidden=true;return;}
+  try{
+    var cfg=await (await fetch('/ctl/config')).json();
+    document.getElementById('cfg-requireHints').checked=!!cfg.requireHints;
+    document.getElementById('cfg-forceVisual').checked=!!cfg.forceVisual;
+    document.getElementById('cfg-auditAsYouGo').checked=!!cfg.auditAsYouGo;
+    var ctx=await (await fetch('/ctl/context')).json();
+    document.getElementById('cfg-context').value=ctx.text||'';
+  }catch(e){}
+  el.hidden=false;
+}
+document.addEventListener('change',function(e){
+  if(e.target&&e.target.id==='cfg-auditAsYouGo'&&e.target.checked){
+    if(!confirm('Audits spawn Sonnet-5 subagents and are token-heavy. Enable?'))e.target.checked=false;
+  }
+});
+async function saveSettings(){
+  var patch={
+    requireHints:document.getElementById('cfg-requireHints').checked,
+    forceVisual:document.getElementById('cfg-forceVisual').checked,
+    auditAsYouGo:document.getElementById('cfg-auditAsYouGo').checked,
+  };
+  try{
+    await post('/config',patch);
+    await post('/context',{text:document.getElementById('cfg-context').value});
+    applyAuditClass(patch.auditAsYouGo);
+    var m=document.getElementById('setmsg');if(m){m.textContent='saved ✓';setTimeout(function(){m.textContent='';},2000);}
+  }catch(e){}
+}
+// Reflect current audit setting on load so the per-batch audit button shows/hides.
+fetch('/ctl/config').then(function(r){return r.json();}).then(function(c){applyAuditClass(c&&c.auditAsYouGo);}).catch(function(){});
+// "Updated Xs ago" badge on reworked/annotated questions, ticked once a second.
+function nowMs(){return (window.performance&&performance.timeOrigin)?performance.timeOrigin+performance.now():+new Date();}
+function stampUpdated(q){
+  if(!q)return;q.dataset.updated=String(nowMs());
+  var h=q.querySelector('h3');if(!h)return;
+  var b=q.querySelector('.qago');if(!b){b=document.createElement('span');b.className='qago';h.appendChild(b);}
+  paintAgo(q);
+}
+function paintAgo(q){
+  var t=Number(q.dataset.updated);if(!t)return;
+  var s=Math.max(0,Math.round((nowMs()-t)/1000));
+  var txt=s<5?'updated just now':(s<60?('updated '+s+'s ago'):('updated '+Math.round(s/60)+'m ago'));
+  var b=q.querySelector('.qago');if(b)b.textContent=txt;
+}
+setInterval(function(){feed.querySelectorAll('.question[data-updated]').forEach(paintAgo);},1000);
+// Multi-select "add your own": Enter appends a chip (add-only, no dedupe).
+feed.addEventListener('keydown',function(e){
+  if(e.key!=='Enter'||!e.target||!e.target.classList.contains('ownadd'))return;
+  e.preventDefault();
+  var v=e.target.value.trim();if(!v)return;
+  var wrap=e.target.closest('.ownwrap');if(!wrap)return;
+  var chip=document.createElement('span');chip.className='ownchip';chip.textContent=v;
+  wrap.querySelector('.ownchips').appendChild(chip);
+  e.target.value='';
+});
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');window.scrollTo(0,1e9);});
+function batchOtherText(el){
+  var parts=[];
+  el.querySelectorAll('.other').forEach(function(o){if(o.value.trim())parts.push(o.value.trim());});
+  el.querySelectorAll('.ownchip').forEach(function(c){if(c.textContent.trim())parts.push(c.textContent.trim());});
+  return parts.join(' | ');
+}
+function addAudit(b){
+  if(!b||b.querySelector('.auditbtn'))return;
+  var btn=document.createElement('button');btn.type='button';btn.className='auditbtn';btn.textContent='⚙ audit this';
+  btn.onclick=function(){post('/signal',{batch:Number(b.dataset.batch),kind:'audit',other:batchOtherText(b)});showToast('audit requested — claude is reviewing','');setStatus('think','claude is auditing…');};
+  b.appendChild(btn);
+}
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);addAudit(nb);setStatus('','your move');if(nb)nb.scrollIntoView({block:'start'});});
 es.addEventListener('qupdate',function(e){
   const d=JSON.parse(e.data);
   const old=feed.querySelector('.question[data-qid="'+d.qid+'"]');
@@ -671,9 +815,22 @@ es.addEventListener('qupdate',function(e){
   old.remove();
   const fresh=feed.querySelector('.question[data-qid="'+d.qid+'"]');
   if(batch){initRank(batch);addActions(batch);}
-  if(fresh){fresh.classList.add('qflash');fresh.scrollIntoView({block:'nearest'});}
+  if(fresh){fresh.classList.add('qflash');stampUpdated(fresh);}
+  refreshSubmitLock();
   showToast('question updated ✓','good');
   setStatus('','your move');
+});
+es.addEventListener('annotate',function(e){
+  const d=JSON.parse(e.data);
+  const q=feed.querySelector('.question[data-qid="'+d.qid+'"]');if(!q)return;
+  const b=document.createElement('div');b.className='qbadge '+(d.level==='serious'?'serious':'warn');
+  const msg=document.createElement('span');msg.className='btext';msg.textContent='⚠ '+d.text;
+  const dis=document.createElement('button');dis.type='button';dis.className='bdismiss';dis.textContent='dismiss';
+  const ask=document.createElement('button');ask.type='button';ask.className='baskme';ask.textContent='ask me';
+  dis.onclick=function(){b.remove();};
+  ask.onclick=function(){post('/signal',{batch:batchOf(q),qid:d.qid,kind:'askme',note:d.text,other:''});b.remove();};
+  b.appendChild(msg);b.appendChild(dis);b.appendChild(ask);
+  q.appendChild(b);stampUpdated(q);showToast('audit note added','');
 });
 es.addEventListener('status',function(e){const d=JSON.parse(e.data);setStatus(d.kind||'',d.text||'');});
 es.addEventListener('retract',function(e){const d=JSON.parse(e.data);feed.querySelectorAll('.batch').forEach(function(el){if(Number(el.dataset.batch)>d.from)el.remove();});setStatus('think','claude is thinking…');});
@@ -682,6 +839,9 @@ ${NAV_JS}
 </script>
 </body></html>`;
 }
+
+// Test hook: expose the rendered live-shell HTML/JS string for assertions.
+export const renderLiveShellForTest = () => renderLiveShell();
 
 // ---------------------------------------------------------------------------
 // Results: raw client payload -> canonical results object
@@ -696,7 +856,15 @@ export function normalizeResults(payload, questions, submittedAt) {
     const a = src[id] && typeof src[id] === 'object' ? src[id] : {};
     let selected = Array.isArray(a.selected) ? a.selected.filter((s) => typeof s === 'string') : [];
     if (type === 'single' && selected.length > 1) selected = selected.slice(0, 1);
-    answers[id] = { selected, other: typeof a.other === 'string' ? a.other : '' };
+    let other;
+    if (type === 'multi') {
+      other = Array.isArray(a.other)
+        ? a.other.filter((s) => typeof s === 'string' && s.trim() !== '')
+        : (typeof a.other === 'string' && a.other.trim() !== '' ? [a.other.trim()] : []);
+    } else {
+      other = typeof a.other === 'string' ? a.other : (Array.isArray(a.other) ? a.other.join(', ') : '');
+    }
+    answers[id] = { selected, other };
   }
   return {
     answers,
@@ -765,7 +933,7 @@ export function serveLive(opts = {}) {
   const maxTries = opts.maxTries || 20;
   let port = opts.port || 8788;
   let tries = 0;
-  const state = { clients: [], batches: [], answers: {}, globalNote: '', pending: [], waiters: [], finished: false };
+  const state = { clients: [], batches: [], answers: {}, globalNote: '', pending: [], waiters: [], finished: false, config: loadConfig() };
 
   const sse = (res, event, data) => { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} };
   const broadcast = (event, data) => { for (const c of state.clients) sse(c, event, data); };
@@ -806,7 +974,9 @@ export function serveLive(opts = {}) {
             const a = answers[k] || {};
             state.answers[k] = {
               selected: Array.isArray(a.selected) ? a.selected.filter((s) => typeof s === 'string') : [],
-              other: typeof a.other === 'string' ? a.other : '',
+              other: Array.isArray(a.other)
+                ? a.other.filter((s) => typeof s === 'string')
+                : (typeof a.other === 'string' ? a.other : ''),
               ...(a.delegated ? { delegated: true } : {}),
             };
           }
@@ -833,7 +1003,7 @@ export function serveLive(opts = {}) {
       if (req.method === 'POST' && p === '/ctl/push') {
         readBody(req).then((body) => {
           let doc;
-          try { doc = normalizeQuestions(JSON.parse(body)); } catch (e) { json(400, { error: String(e && e.message || e) }); return; }
+          try { doc = normalizeQuestions(JSON.parse(body), state.config); } catch (e) { json(400, { error: String(e && e.message || e) }); return; }
           const id = state.batches.length;
           const html = renderBatchHtml(doc, id);
           const qids = [];
@@ -865,6 +1035,16 @@ export function serveLive(opts = {}) {
         });
         return;
       }
+      if (req.method === 'POST' && p === '/ctl/annotate') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          if (!d.qid || typeof d.text !== 'string') { json(400, { error: 'annotate needs { qid, text, level? }' }); return; }
+          // Non-destructive: a badge on the question, NOT a replace — keeps the answer.
+          broadcast('annotate', { qid: d.qid, level: d.level === 'serious' ? 'serious' : 'warn', text: d.text });
+          json(200, { ok: true });
+        });
+        return;
+      }
       if (req.method === 'POST' && p === '/ctl/retract') {
         readBody(req).then((body) => {
           let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
@@ -890,7 +1070,26 @@ export function serveLive(opts = {}) {
         return;
       }
       if (req.method === 'GET' && p === '/ctl/state') {
-        json(200, { answers: state.answers, globalNote: state.globalNote, batches: state.batches.length, finished: state.finished }); return;
+        json(200, { answers: state.answers, globalNote: state.globalNote, batches: state.batches.length, finished: state.finished, config: state.config }); return;
+      }
+      if (req.method === 'POST' && p === '/config') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          state.config = saveConfig(d);
+          broadcast('status', { kind: '', text: 'settings saved' });
+          json(200, state.config);
+        });
+        return;
+      }
+      if (req.method === 'GET' && p === '/ctl/config') { json(200, state.config); return; }
+      if (req.method === 'GET' && p === '/ctl/context') { json(200, { text: loadContext() }); return; }
+      if (req.method === 'POST' && p === '/context') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          saveContext(d.text);
+          json(200, { ok: true });
+        });
+        return;
       }
       if (req.method === 'POST' && p === '/ctl/finish') {
         readBody(req).then((body) => {
@@ -928,16 +1127,60 @@ function openBrowser(url) {
 }
 
 const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : null; };
-const SESSION_DEFAULT = `${tmpdir()}/rizzdev-detective-live.json`;
+// Where to write the session file: an explicit --session wins; else a port-keyed
+// file for intentional parallel (--port) sessions; else the single default.
+const sessionPathFor = (args) => argFlag(args, 'session')
+  || (argFlag(args, 'port') ? `${tmpdir()}/claude-detective-live.${argFlag(args, 'port')}.json` : SESSION_DEFAULT);
+export const PKG_NAME = 'claude-detective';
+const SESSION_DEFAULT = `${tmpdir()}/claude-detective-live.json`;
+
+// Global config + context live under the skills dir (no per-project config).
+const CONFIG_DEFAULTS = { requireHints: true, forceVisual: false, auditAsYouGo: false };
+export function configPath() {
+  const base = process.env.CLAUDE_SKILLS_DIR || `${process.env.HOME}/.claude/skills`;
+  return `${base}/claude-detective/config.json`;
+}
+export function loadConfig() {
+  try { return { ...CONFIG_DEFAULTS, ...JSON.parse(readFileSync(configPath(), 'utf8')) }; }
+  catch { return { ...CONFIG_DEFAULTS }; }
+}
+export function saveConfig(patch) {
+  const next = { ...loadConfig(), ...(patch && typeof patch === 'object' ? patch : {}) };
+  try { mkdirSync(configPath().replace(/\/[^/]+$/, ''), { recursive: true }); } catch {}
+  writeFileSync(configPath(), JSON.stringify(next, null, 2));
+  return next;
+}
+export function contextPath() { return configPath().replace(/config\.json$/, 'context.md'); }
+export function loadContext() { try { return readFileSync(contextPath(), 'utf8'); } catch { return ''; } }
+export function saveContext(text) {
+  try { mkdirSync(contextPath().replace(/\/[^/]+$/, ''), { recursive: true }); } catch {}
+  writeFileSync(contextPath(), typeof text === 'string' ? text : '');
+  return loadContext();
+}
+
+// Is the session file pointing at a server that's actually up? Used to hard-block
+// a second interview (which would clobber the single session file).
+export async function isSessionLive(sessionPath) {
+  let s;
+  try { s = JSON.parse(readFileSync(sessionPath, 'utf8')); } catch { return { live: false }; }
+  if (!s || !s.pid || !s.url) return { live: false };
+  try { process.kill(s.pid, 0); } catch { return { live: false }; } // stale pid
+  try {
+    const r = await fetch(`${s.url.replace(/\/$/, '')}/ctl/state`, { signal: AbortSignal.timeout(400) });
+    if (r.ok) return { live: true, url: s.url, port: s.port, pid: s.pid };
+  } catch {}
+  return { live: false };
+}
 
 const USAGE = `usage:
-  detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit)
+  detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit; --force to replace a live one)
   detective.mjs --demo                                    open a built-in sample interview
   detective.mjs <questions.json> --once                   standalone: self-finish on submit (no agent driving)
   detective.mjs --static <questions.json>                 legacy static one-page form (fallback)
   detective.mjs --live [--port N] [--out <file>]          start a persistent live server (adaptive)
   detective.mjs push <batch.json> [--port N]              push a question batch into the live server
   detective.mjs update <update.json> [--port N]           replace ONE question in place ({qid, question})
+  detective.mjs annotate <file> [--port N]                attach a non-blocking badge ({qid, text, level?})
   detective.mjs wait [--timeout SEC] [--port N]           block until the user answers a batch
   detective.mjs retract --from <batchId> [--port N]       drop batches after a revised answer
   detective.mjs finish [--out <file>] [--port N]          end the interview, print the transcript
@@ -946,7 +1189,7 @@ const USAGE = `usage:
 async function ctlBase(args) {
   const port = argFlag(args, 'port');
   if (port) return `http://127.0.0.1:${port}`;
-  const sp = argFlag(args, 'session') || SESSION_DEFAULT;
+  const sp = sessionPathFor(args);
   const s = JSON.parse(readFileSync(sp, 'utf8'));
   return `http://127.0.0.1:${s.port}`;
 }
@@ -965,6 +1208,11 @@ async function runControl(cmd, args) {
     const file = positional[1];
     if (!file) { console.error('usage: detective.mjs update <update.json>   (file: {"qid":"...","question":{...}})'); process.exit(2); }
     const r = await fetch(`${base}/ctl/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: readFileSync(file, 'utf8') });
+    process.stdout.write((await r.text()) + '\n'); process.exit(r.ok ? 0 : 1);
+  } else if (cmd === 'annotate') {
+    const file = positional[1];
+    if (!file) { console.error('usage: detective.mjs annotate <file>   (file: {"qid":"...","text":"...","level":"warn|serious"})'); process.exit(2); }
+    const r = await fetch(`${base}/ctl/annotate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: readFileSync(file, 'utf8') });
     process.stdout.write((await r.text()) + '\n'); process.exit(r.ok ? 0 : 1);
   } else if (cmd === 'wait') {
     const t = argFlag(args, 'timeout') || '1800';
@@ -988,12 +1236,12 @@ async function runControl(cmd, args) {
 }
 
 async function runLiveServer(args) {
-  const sp = argFlag(args, 'session') || SESSION_DEFAULT;
+  const sp = sessionPathFor(args);
   const transcript = await serveLive({
     port: Number(argFlag(args, 'port') || 8788),
     onListen: (url, actualPort) => {
       try { writeFileSync(sp, JSON.stringify({ port: actualPort, url, pid: process.pid })); } catch {}
-      console.error(`\nrizzdev-detective live → ${url}`);
+      console.error(`\nclaude-detective live → ${url}`);
       console.error('drive it:  push <batch.json>  ·  wait  ·  finish\n');
       openBrowser(url);
     },
@@ -1012,15 +1260,24 @@ async function runLiveServer(args) {
 // rework a single question in place with `update` and keep the user's progress.
 // Run this in the background and drive it with the control sub-commands.
 async function runInterview(rawJson, args) {
-  const sp = argFlag(args, 'session') || SESSION_DEFAULT;
+  const sp = sessionPathFor(args);
   const outPath = argFlag(args, 'out');
+  // Hard-block a second interview on the default session — it would clobber the
+  // session file and orphan the first server. --force / --port / --session opt out.
+  if (!args.includes('--force') && !argFlag(args, 'port') && !argFlag(args, 'session')) {
+    const cur = await isSessionLive(sp);
+    if (cur.live) {
+      console.error(`error: an interview is already live at ${cur.url} — finish it, or pass --force`);
+      process.exit(1);
+    }
+  }
   let base = null;
   const done = serveLive({
     port: Number(argFlag(args, 'port') || 8788),
     onListen: (url, port) => {
       base = `http://127.0.0.1:${port}`;
       try { writeFileSync(sp, JSON.stringify({ port, url, pid: process.pid })); } catch {}
-      console.error(`\nrizzdev-detective ready → ${url}`);
+      console.error(`\nclaude-detective ready → ${url}`);
       console.error('drive it:  wait  ·  update <file>  ·  push <file>  ·  finish\n');
       openBrowser(url);
     },
@@ -1043,10 +1300,11 @@ async function runInterview(rawJson, args) {
   // be reworked without a driver, so they just come back as a pending signal.)
   if (args.includes('--once') || args.includes('--demo')) {
     const wait = await (await fetch(`${base}/ctl/wait?timeout=${argFlag(args, 'timeout') || 1800}`)).json();
-    const signal = (wait.events || []).find((e) => e.type === 'signal');
+    // Drain ALL signals — multiple live triggers arrive queued as one array.
+    const signals = (wait.events || []).filter((e) => e.type === 'signal');
     let output;
-    if (signal) {
-      output = { pending: signal };
+    if (signals.length) {
+      output = { pending: signals };
       await fetch(`${base}/ctl/finish`, { method: 'POST', body: '{}' }).catch(() => {});
     } else {
       output = await (await fetch(`${base}/ctl/finish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
@@ -1164,7 +1422,7 @@ async function runOneShot(args) {
   }
   const results = await serve(questions, {
     onListen: (url) => {
-      console.error(`\nrizzdev-detective ready → ${url}`);
+      console.error(`\nclaude-detective ready → ${url}`);
       console.error('Waiting for you to submit your answers…\n');
       openBrowser(url);
     },
@@ -1178,7 +1436,7 @@ async function main() {
   const args = process.argv.slice(2);
   const cmd = args.filter((a) => !a.startsWith('--'))[0];
   if (args.includes('--live')) return runLiveServer(args);
-  if (['push', 'update', 'wait', 'retract', 'finish', 'state'].includes(cmd)) return runControl(cmd, args);
+  if (['push', 'update', 'annotate', 'wait', 'retract', 'finish', 'state'].includes(cmd)) return runControl(cmd, args);
   if (args.includes('--static')) return runOneShot(args); // hidden fallback: legacy static one-page form
   return runDefault(args); // default: unified live interview (one blocking command)
 }
