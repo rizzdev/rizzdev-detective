@@ -1176,6 +1176,7 @@ const USAGE = `usage:
   detective.mjs --live [--port N] [--out <file>]          start a persistent live server (adaptive)
   detective.mjs push <batch.json> [--port N]              push a question batch into the live server
   detective.mjs update <update.json> [--port N]           replace ONE question in place ({qid, question})
+  detective.mjs annotate <file> [--port N]                attach a non-blocking badge ({qid, text, level?})
   detective.mjs wait [--timeout SEC] [--port N]           block until the user answers a batch
   detective.mjs retract --from <batchId> [--port N]       drop batches after a revised answer
   detective.mjs finish [--out <file>] [--port N]          end the interview, print the transcript
@@ -1203,6 +1204,11 @@ async function runControl(cmd, args) {
     const file = positional[1];
     if (!file) { console.error('usage: detective.mjs update <update.json>   (file: {"qid":"...","question":{...}})'); process.exit(2); }
     const r = await fetch(`${base}/ctl/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: readFileSync(file, 'utf8') });
+    process.stdout.write((await r.text()) + '\n'); process.exit(r.ok ? 0 : 1);
+  } else if (cmd === 'annotate') {
+    const file = positional[1];
+    if (!file) { console.error('usage: detective.mjs annotate <file>   (file: {"qid":"...","text":"...","level":"warn|serious"})'); process.exit(2); }
+    const r = await fetch(`${base}/ctl/annotate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: readFileSync(file, 'utf8') });
     process.stdout.write((await r.text()) + '\n'); process.exit(r.ok ? 0 : 1);
   } else if (cmd === 'wait') {
     const t = argFlag(args, 'timeout') || '1800';
@@ -1290,10 +1296,11 @@ async function runInterview(rawJson, args) {
   // be reworked without a driver, so they just come back as a pending signal.)
   if (args.includes('--once') || args.includes('--demo')) {
     const wait = await (await fetch(`${base}/ctl/wait?timeout=${argFlag(args, 'timeout') || 1800}`)).json();
-    const signal = (wait.events || []).find((e) => e.type === 'signal');
+    // Drain ALL signals — multiple live triggers arrive queued as one array.
+    const signals = (wait.events || []).filter((e) => e.type === 'signal');
     let output;
-    if (signal) {
-      output = { pending: signal };
+    if (signals.length) {
+      output = { pending: signals };
       await fetch(`${base}/ctl/finish`, { method: 'POST', body: '{}' }).catch(() => {});
     } else {
       output = await (await fetch(`${base}/ctl/finish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
@@ -1425,7 +1432,7 @@ async function main() {
   const args = process.argv.slice(2);
   const cmd = args.filter((a) => !a.startsWith('--'))[0];
   if (args.includes('--live')) return runLiveServer(args);
-  if (['push', 'update', 'wait', 'retract', 'finish', 'state'].includes(cmd)) return runControl(cmd, args);
+  if (['push', 'update', 'annotate', 'wait', 'retract', 'finish', 'state'].includes(cmd)) return runControl(cmd, args);
   if (args.includes('--static')) return runOneShot(args); // hidden fallback: legacy static one-page form
   return runDefault(args); // default: unified live interview (one blocking command)
 }

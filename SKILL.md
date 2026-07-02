@@ -131,10 +131,13 @@ Then surface what you learned in the form:
      drop now-stale later batches, then push a fresh branch. Otherwise push the
      next batch (if adaptive) or `finish` if you have what you need.
    - `{type:"signal", batch, qid, kind, note, other}` — a **live action** on one
-     question (see next section). That single question is now locked/greyed in
-     the UI showing "claude is reworking this…". Rework it and `update` it in
-     place; the user keeps everything else they've filled in.
+     question (see next section). For `rethink`/`research`/`more` that single
+     question is locked/greyed showing "claude is reworking this…"; rework it and
+     `update` it in place. For `kind:"audit"`/`kind:"askme"` see "Audit" below.
    - `{type:"ended"}` — they hit "end interview" → `finish`.
+
+   **Drain every event.** Multiple live triggers arrive queued as one array in a
+   single `wait` — iterate **all** of `wait.events`, never just the first.
 
 4. **The loop:** (background) wait → react (`update` a question / `push` a batch /
    `retract`) → wait → … → `finish`. Tell the user you're researching/thinking
@@ -178,6 +181,45 @@ Handle each `kind`:
 Always read `other`: it carries whatever the user had typed in that question's
 "Other" box when they hit the button — they may have used it to hand you info.
 
+**Reworks and audit are in-place — never `push`.** Use `update` (or `annotate` for
+audit) to change/annotate an existing question. Pushing a new batch for a rework is
+what creates a duplicate "continue" bar and a jumpy page.
+
+## Audit ("audit this")
+
+When the user enables **audit** in ⚙ settings, each batch shows an `⚙ audit this`
+button. Clicking it sends `{type:"signal", kind:"audit", batch, other}` — where
+`other` is any nuance text the user had typed for that batch. **Prioritize that
+text**: it's the user steering what to scrutinize.
+
+On `kind:"audit"`: spawn **unbiased Sonnet-5 subagent(s)** that review the batch's
+answers + relevant context from a fresh, skeptical angle — hunting problems,
+gotchas, logic faults, and hallucinations (assume nothing prior was right). For each
+concern, attach a **non-blocking** badge:
+
+```bash
+node ~/.claude/skills/claude-detective/detective.mjs annotate <annotate.json>
+# annotate.json: { "qid": "auth", "level": "warn", "text": "token rotation unhandled" }
+```
+
+Annotate (not `update`) keeps the user's selection. Badges never block submit.
+
+On `kind:"askme"` (the user clicked `ask me` on a badge): `push` a targeted
+follow-up question about that concern.
+
+## Authoring rules (standing)
+
+- **Always write both hints.** Every question needs a `why`; every option needs a
+  `pro` (or a `hint`). Enforced when `requireHints` is on (the default).
+- **Prioritize "Other / add nuance."** Whenever an answer's `other` is non-empty
+  (a string for single/yesno, a `string[]` for multi), do a quick think/review cycle
+  on it before continuing — it often carries the real signal.
+- **`forceVisual`:** when on, author a compact inline-SVG or ASCII `visual` per
+  single/multi question; set `visual:false` only when a diagram truly adds nothing.
+- **Read `context.md` first.** Treat
+  `~/.claude/skills/claude-detective/context.md` as highest-priority guidance,
+  above your own defaults.
+
 ## Reading the transcript
 
 `finish` (and the backgrounded run's `--out`) gives you:
@@ -192,8 +234,9 @@ Always read `other`: it carries whatever the user had typed in that question's
 
 `answers` is keyed by question `id`; `selected` holds chosen option ids (0–1 for
 single/yesno, 0–n for multi, full order for rank); `other` is the per-question
-free-text box; `answers[id].delegated` is `true` if they hit "you decide".
-Unanswered questions come back with empty `selected`.
+free-text box — a **string** for single/yesno, and a **`string[]`** of custom
+entries for `multi` (the "add your own" chips); `answers[id].delegated` is `true` if
+they hit "you decide". Unanswered questions come back with empty `selected`.
 
 ## Notes
 
