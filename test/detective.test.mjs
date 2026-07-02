@@ -39,6 +39,27 @@ test('a reworking batch disables its continue button', () => {
   const shell = renderLiveShellForTest();
   assert.match(shell, /function refreshSubmitLock/);
 });
+
+test('normalizeResults keeps other as array for multi, string for single', () => {
+  const q = normalizeQuestions({ questions: [
+    { id: 'm', text: 'M', type: 'multi', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+    { id: 's', text: 'S', type: 'single', options: [{ id: 'x', label: 'X' }] },
+  ] });
+  const out = normalizeResults({ answers: {
+    m: { selected: ['a'], other: ['SAML', 'magic link'] },
+    s: { selected: ['x'], other: 'note' },
+  } }, q);
+  assert.deepEqual(out.answers.m.other, ['SAML', 'magic link']);
+  assert.equal(out.answers.s.other, 'note');
+});
+
+test('normalizeResults coerces a stray string other on multi to a one-item array', () => {
+  const q = normalizeQuestions({ questions: [
+    { id: 'm', text: 'M', type: 'multi', options: [{ id: 'a', label: 'A' }] },
+  ] });
+  const out = normalizeResults({ answers: { m: { selected: [], other: 'lone' } } }, q);
+  assert.deepEqual(out.answers.m.other, ['lone']);
+});
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
@@ -404,7 +425,7 @@ const two = normalizeQuestions({ questions: [
 test('normalizeResults fills every question and passes globalNote + submittedAt', () => {
   const r = normalizeResults({ answers: { q1: { selected: ['a'], other: '' } }, globalNote: 'hi' }, two, '2026-07-01T00:00:00.000Z');
   assert.deepEqual(r.answers.q1, { selected: ['a'], other: '' });
-  assert.deepEqual(r.answers.q2, { selected: [], other: '' });
+  assert.deepEqual(r.answers.q2, { selected: [], other: [] }); // multi → other is a string[]
   assert.equal(r.globalNote, 'hi');
   assert.equal(r.submittedAt, '2026-07-01T00:00:00.000Z');
 });
@@ -417,7 +438,7 @@ test('normalizeResults trims single-type to at most one selection', () => {
 test('normalizeResults keeps multiple selections for multi-type and preserves other text', () => {
   const r = normalizeResults({ answers: { q2: { selected: ['x', 'y'], other: 'z' } } }, two, 'T');
   assert.deepEqual(r.answers.q2.selected, ['x', 'y']);
-  assert.equal(r.answers.q2.other, 'z');
+  assert.deepEqual(r.answers.q2.other, ['z']); // multi → other coerced to a string[]
 });
 
 test('normalizeResults tolerates a completely empty payload', () => {

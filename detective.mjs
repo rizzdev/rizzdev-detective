@@ -194,7 +194,11 @@ function renderQuestion(q) {
   const rec = q.recommendation && q.recommendation.why
     ? `<div class="rec">${fmt(q.recommendation.why)}</div>` : '';
   const other = q.allowOther
-    ? `<input type="text" class="other" id="other__${esc(q.id)}" placeholder="Other / add nuance…">` : '';
+    ? (q.type === 'multi'
+        ? `<div class="ownwrap" data-qid="${esc(q.id)}"><div class="ownchips"></div>`
+          + `<input type="text" class="ownadd" placeholder="Add your own… (Enter)"></div>`
+        : `<input type="text" class="other" id="other__${esc(q.id)}" placeholder="Other / add nuance…">`)
+    : '';
   // A long list of short, pro/con-free options flows into two columns.
   const shortEnough = q.options.every((o) => !o.pro && !o.con && String(o.label).length <= 28);
   const twoCol = q.render === 'list' && q.options.length >= 6 && shortEnough;
@@ -325,6 +329,11 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 
 .other{width:calc(100% - var(--indent));margin:6px 0 0 var(--indent);background:#080b11;border:1px solid #222a3a;color:var(--tx2);padding:5px 9px;font:inherit;font-size:var(--fs-meta)}
 .other::placeholder,textarea#__global::placeholder{color:var(--tx4)}
+.ownwrap{margin:6px 0 0 var(--indent)}
+.ownadd{width:calc(100% - var(--indent));background:#080b11;border:1px solid #222a3a;color:var(--tx2);padding:5px 9px;font:inherit;font-size:var(--fs-meta)}
+.ownadd::placeholder{color:var(--tx4)}
+.ownchips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
+.ownchip{background:#0f1c13;border:1px solid #2c8f45;color:var(--grn);padding:2px 8px;border-radius:10px;font-size:var(--fs-micro)}
 .other:focus,textarea#__global:focus{outline:0;border-color:var(--blu);box-shadow:0 0 0 1px rgba(108,182,255,.35)}
 
 /* global note = its own panel */
@@ -576,9 +585,11 @@ function collect(id){
     const rank=el.querySelector('.rank[data-qid="'+qid+'"]');
     const sel=rank?[...rank.querySelectorAll('.rankrow')].map(r=>r.dataset.oid)
                   :[...el.querySelectorAll('input[data-qid="'+qid+'"]:checked')].map(i=>i.value);
+    const own=el.querySelector('.ownwrap[data-qid="'+qid+'"]');
     const o=el.querySelector('[id="other__'+qid+'"]');
+    const other=own?[].slice.call(own.querySelectorAll('.ownchip')).map(c=>c.textContent):(o?o.value:'');
     const q=el.querySelector('.question[data-qid="'+qid+'"]');
-    ans[qid]={selected:sel,other:o?o.value:'',delegated:!!(q&&q.classList.contains('delegated'))};
+    ans[qid]={selected:sel,other:other,delegated:!!(q&&q.classList.contains('delegated'))};
   });
   return ans;
 }
@@ -669,6 +680,16 @@ async function resend(id){
   await post('/answer',{batch:Number(id),answers:answers,revised:true});
 }
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
+// Multi-select "add your own": Enter appends a chip (add-only, no dedupe).
+feed.addEventListener('keydown',function(e){
+  if(e.key!=='Enter'||!e.target||!e.target.classList.contains('ownadd'))return;
+  e.preventDefault();
+  var v=e.target.value.trim();if(!v)return;
+  var wrap=e.target.closest('.ownwrap');if(!wrap)return;
+  var chip=document.createElement('span');chip.className='ownchip';chip.textContent=v;
+  wrap.querySelector('.ownchips').appendChild(chip);
+  e.target.value='';
+});
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
 es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');if(nb)nb.scrollIntoView({block:'start'});});
@@ -710,7 +731,15 @@ export function normalizeResults(payload, questions, submittedAt) {
     const a = src[id] && typeof src[id] === 'object' ? src[id] : {};
     let selected = Array.isArray(a.selected) ? a.selected.filter((s) => typeof s === 'string') : [];
     if (type === 'single' && selected.length > 1) selected = selected.slice(0, 1);
-    answers[id] = { selected, other: typeof a.other === 'string' ? a.other : '' };
+    let other;
+    if (type === 'multi') {
+      other = Array.isArray(a.other)
+        ? a.other.filter((s) => typeof s === 'string' && s.trim() !== '')
+        : (typeof a.other === 'string' && a.other.trim() !== '' ? [a.other.trim()] : []);
+    } else {
+      other = typeof a.other === 'string' ? a.other : (Array.isArray(a.other) ? a.other.join(', ') : '');
+    }
+    answers[id] = { selected, other };
   }
   return {
     answers,
@@ -820,7 +849,9 @@ export function serveLive(opts = {}) {
             const a = answers[k] || {};
             state.answers[k] = {
               selected: Array.isArray(a.selected) ? a.selected.filter((s) => typeof s === 'string') : [],
-              other: typeof a.other === 'string' ? a.other : '',
+              other: Array.isArray(a.other)
+                ? a.other.filter((s) => typeof s === 'string')
+                : (typeof a.other === 'string' ? a.other : ''),
               ...(a.delegated ? { delegated: true } : {}),
             };
           }
