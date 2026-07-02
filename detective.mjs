@@ -224,11 +224,15 @@ function renderQuestion(q) {
       ? renderRankItems(q)
       : `<div class="options${twoCol ? ' two-col' : ''}">${q.options.map((o) => renderOption(q, o)).join('')}</div>`;
   const recAttr = q.recommendation && q.recommendation.optionId ? ` data-rec="${esc(q.recommendation.optionId)}"` : '';
+  const visual = (typeof q.visual === 'string' && q.visual.trim())
+    ? `<div class="visual">${/^\s*<svg[\s>]/i.test(q.visual) ? q.visual : `<pre>${esc(q.visual)}</pre>`}</div>`
+    : '';
   return `
     <section class="question" data-qid="${esc(q.id)}"${recAttr}>
       <h3>${esc(q.text)}</h3>
       ${why}
       ${rec}
+      ${visual}
       ${controls}
       ${other}
     </section>`;
@@ -321,6 +325,9 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .pro{color:var(--grn2)}.pro::before{content:"+ ";font-weight:700}
 .con{color:var(--red)}.con::before{content:"- ";font-weight:700}
 .ohint{padding-left:0;font-size:var(--fs-micro);margin-top:1px;color:var(--tx4)}
+.visual{margin:8px 0;padding:8px;border:1px solid #222a3a;border-radius:6px;overflow:auto}
+.visual pre{margin:0;white-space:pre;font-size:var(--fs-micro);color:var(--tx3)}
+.visual svg{max-width:100%;height:auto}
 
 /* drag-to-rank */
 .rank{list-style:none;counter-reset:rk;margin:2px 0 0;padding-left:0;display:flex;flex-direction:column;gap:2px}

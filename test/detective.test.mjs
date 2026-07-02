@@ -60,6 +60,26 @@ test('validateQuestions with no opts is unchanged', () => {
   assert.doesNotThrow(() => validateQuestions(doc));
 });
 
+test('forceVisual requires a visual on single/multi', () => {
+  const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
+  assert.throws(() => validateQuestions(doc, { forceVisual: true }), /visual/i);
+});
+
+test('forceVisual accepts an explicit visual:false opt-out', () => {
+  const doc = { questions: [{ id: 'q', text: 't', visual: false, options: [{ id: 'a', label: 'A' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { forceVisual: true }));
+});
+
+test('forceVisual exempts yesno', () => {
+  const doc = { questions: [{ id: 'q', text: 't', type: 'yesno' }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { forceVisual: true }));
+});
+
+test('renderQuestion shows a visual block', () => {
+  const n = normalizeQuestions({ questions: [{ id: 'q', text: 't', visual: '<svg width="1"></svg>', options: [{ id: 'a', label: 'A' }] }] });
+  assert.match(renderQuestionHtml(n.sections[0].questions[0], 'q'), /class="visual"/);
+});
+
 test('live shell renders a relative-time updater', () => {
   const shell = renderLiveShellForTest();
   assert.match(shell, /qago/);
