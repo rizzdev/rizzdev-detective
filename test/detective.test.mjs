@@ -12,7 +12,22 @@ import {
   DEMO_QUESTIONS,
   PKG_NAME,
   isSessionLive,
+  renderLiveShellForTest,
 } from '../detective.mjs';
+
+test('qupdate handler flashes in place without scrolling', () => {
+  const shell = renderLiveShellForTest();
+  const m = shell.match(/addEventListener\('qupdate',function\(e\)\{([\s\S]*?)\}\);/);
+  assert.ok(m, 'qupdate handler present');
+  assert.doesNotMatch(m[1], /scrollIntoView/);
+});
+
+test('batch handler dedupes an already-rendered batch id', () => {
+  const shell = renderLiveShellForTest();
+  const m = shell.match(/addEventListener\('batch',function\(e\)\{([\s\S]*?)\}\);/);
+  assert.ok(m, 'batch handler present');
+  assert.match(m[1], /\.batch\[data-batch="/);
+});
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 

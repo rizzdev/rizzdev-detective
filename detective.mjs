@@ -661,7 +661,7 @@ async function resend(id){
 async function endInterview(){setStatus('think','wrapping up…');await post('/end',{});}
 const es=new EventSource('/events');
 es.onopen=function(){setStatus('','waiting for the first question…');};
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');window.scrollTo(0,1e9);});
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);setStatus('','your move');window.scrollTo(0,1e9);});
 es.addEventListener('qupdate',function(e){
   const d=JSON.parse(e.data);
   const old=feed.querySelector('.question[data-qid="'+d.qid+'"]');
@@ -671,7 +671,7 @@ es.addEventListener('qupdate',function(e){
   old.remove();
   const fresh=feed.querySelector('.question[data-qid="'+d.qid+'"]');
   if(batch){initRank(batch);addActions(batch);}
-  if(fresh){fresh.classList.add('qflash');fresh.scrollIntoView({block:'nearest'});}
+  if(fresh){fresh.classList.add('qflash');}
   showToast('question updated ✓','good');
   setStatus('','your move');
 });
@@ -682,6 +682,9 @@ ${NAV_JS}
 </script>
 </body></html>`;
 }
+
+// Test hook: expose the rendered live-shell HTML/JS string for assertions.
+export const renderLiveShellForTest = () => renderLiveShell();
 
 // ---------------------------------------------------------------------------
 // Results: raw client payload -> canonical results object
