@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync, mkdirSync } from 'node:fs';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -824,7 +824,7 @@ export function serveLive(opts = {}) {
   const maxTries = opts.maxTries || 20;
   let port = opts.port || 8788;
   let tries = 0;
-  const state = { clients: [], batches: [], answers: {}, globalNote: '', pending: [], waiters: [], finished: false };
+  const state = { clients: [], batches: [], answers: {}, globalNote: '', pending: [], waiters: [], finished: false, config: loadConfig() };
 
   const sse = (res, event, data) => { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} };
   const broadcast = (event, data) => { for (const c of state.clients) sse(c, event, data); };
@@ -951,8 +951,18 @@ export function serveLive(opts = {}) {
         return;
       }
       if (req.method === 'GET' && p === '/ctl/state') {
-        json(200, { answers: state.answers, globalNote: state.globalNote, batches: state.batches.length, finished: state.finished }); return;
+        json(200, { answers: state.answers, globalNote: state.globalNote, batches: state.batches.length, finished: state.finished, config: state.config }); return;
       }
+      if (req.method === 'POST' && p === '/config') {
+        readBody(req).then((body) => {
+          let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
+          state.config = saveConfig(d);
+          broadcast('status', { kind: '', text: 'settings saved' });
+          json(200, state.config);
+        });
+        return;
+      }
+      if (req.method === 'GET' && p === '/ctl/config') { json(200, state.config); return; }
       if (req.method === 'POST' && p === '/ctl/finish') {
         readBody(req).then((body) => {
           let d = {}; try { d = JSON.parse(body || '{}'); } catch {}
@@ -991,6 +1001,23 @@ function openBrowser(url) {
 const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : null; };
 export const PKG_NAME = 'claude-detective';
 const SESSION_DEFAULT = `${tmpdir()}/claude-detective-live.json`;
+
+// Global config + context live under the skills dir (no per-project config).
+const CONFIG_DEFAULTS = { requireHints: true, forceVisual: false, auditAsYouGo: false };
+export function configPath() {
+  const base = process.env.CLAUDE_SKILLS_DIR || `${process.env.HOME}/.claude/skills`;
+  return `${base}/claude-detective/config.json`;
+}
+export function loadConfig() {
+  try { return { ...CONFIG_DEFAULTS, ...JSON.parse(readFileSync(configPath(), 'utf8')) }; }
+  catch { return { ...CONFIG_DEFAULTS }; }
+}
+export function saveConfig(patch) {
+  const next = { ...loadConfig(), ...(patch && typeof patch === 'object' ? patch : {}) };
+  try { mkdirSync(configPath().replace(/\/[^/]+$/, ''), { recursive: true }); } catch {}
+  writeFileSync(configPath(), JSON.stringify(next, null, 2));
+  return next;
+}
 
 // Is the session file pointing at a server that's actually up? Used to hard-block
 // a second interview (which would clobber the single session file).

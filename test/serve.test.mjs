@@ -1,6 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeQuestions, serve } from '../detective.mjs';
+import { tmpdir } from 'node:os';
+import { normalizeQuestions, serve, serveLive } from '../detective.mjs';
+
+// Isolate config/context writes to a temp skills dir (never touch the real ~/.claude).
+process.env.CLAUDE_SKILLS_DIR = `${tmpdir()}/cd-test-skills-${Math.floor(performance.now())}`;
+
+test('POST /config persists and /ctl/state reflects it', async () => {
+  let base;
+  const done = serveLive({ port: 8901, onListen: (u, p) => { base = `http://127.0.0.1:${p}`; } });
+  while (!base) await new Promise((r) => setTimeout(r, 10));
+  try {
+    await fetch(`${base}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forceVisual: true }) });
+    const st = await (await fetch(`${base}/ctl/state`)).json();
+    assert.equal(st.config.forceVisual, true);
+    assert.equal(st.config.requireHints, true); // default preserved
+  } finally {
+    await fetch(`${base}/ctl/finish`, { method: 'POST', body: '{}' });
+  }
+  await done;
+});
 
 const doc = normalizeQuestions({ questions: [
   { id: 'q1', text: 'one', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
