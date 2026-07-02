@@ -11,10 +11,25 @@ import {
   normalizeResults,
   DEMO_QUESTIONS,
   PKG_NAME,
+  isSessionLive,
 } from '../detective.mjs';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 test('package identity is claude-detective', () => {
   assert.equal(PKG_NAME, 'claude-detective');
+});
+
+test('isSessionLive reports not-live for a stale pid', async () => {
+  const p = `${tmpdir()}/cd-test-stale.json`;
+  writeFileSync(p, JSON.stringify({ port: 59999, url: 'http://127.0.0.1:59999/', pid: 2 ** 30 }));
+  const r = await isSessionLive(p);
+  assert.equal(r.live, false);
+});
+
+test('isSessionLive reports not-live when file is missing', async () => {
+  const r = await isSessionLive(`${tmpdir()}/cd-test-missing-${Math.floor(performance.now())}.json`);
+  assert.equal(r.live, false);
 });
 
 test('the built-in --demo questions are valid and render', () => {

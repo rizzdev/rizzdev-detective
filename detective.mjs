@@ -931,8 +931,22 @@ const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i 
 export const PKG_NAME = 'claude-detective';
 const SESSION_DEFAULT = `${tmpdir()}/claude-detective-live.json`;
 
+// Is the session file pointing at a server that's actually up? Used to hard-block
+// a second interview (which would clobber the single session file).
+export async function isSessionLive(sessionPath) {
+  let s;
+  try { s = JSON.parse(readFileSync(sessionPath, 'utf8')); } catch { return { live: false }; }
+  if (!s || !s.pid || !s.url) return { live: false };
+  try { process.kill(s.pid, 0); } catch { return { live: false }; } // stale pid
+  try {
+    const r = await fetch(`${s.url.replace(/\/$/, '')}/ctl/state`, { signal: AbortSignal.timeout(400) });
+    if (r.ok) return { live: true, url: s.url, port: s.port, pid: s.pid };
+  } catch {}
+  return { live: false };
+}
+
 const USAGE = `usage:
-  detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit)
+  detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit; --force to replace a live one)
   detective.mjs --demo                                    open a built-in sample interview
   detective.mjs <questions.json> --once                   standalone: self-finish on submit (no agent driving)
   detective.mjs --static <questions.json>                 legacy static one-page form (fallback)
@@ -1015,6 +1029,15 @@ async function runLiveServer(args) {
 async function runInterview(rawJson, args) {
   const sp = argFlag(args, 'session') || SESSION_DEFAULT;
   const outPath = argFlag(args, 'out');
+  // Hard-block a second interview on the default session — it would clobber the
+  // session file and orphan the first server. --force / --port / --session opt out.
+  if (!args.includes('--force') && !argFlag(args, 'port') && !argFlag(args, 'session')) {
+    const cur = await isSessionLive(sp);
+    if (cur.live) {
+      console.error(`error: an interview is already live at ${cur.url} — finish it, or pass --force`);
+      process.exit(1);
+    }
+  }
   let base = null;
   const done = serveLive({
     port: Number(argFlag(args, 'port') || 8788),
