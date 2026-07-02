@@ -1127,6 +1127,10 @@ function openBrowser(url) {
 }
 
 const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : null; };
+// Where to write the session file: an explicit --session wins; else a port-keyed
+// file for intentional parallel (--port) sessions; else the single default.
+const sessionPathFor = (args) => argFlag(args, 'session')
+  || (argFlag(args, 'port') ? `${tmpdir()}/claude-detective-live.${argFlag(args, 'port')}.json` : SESSION_DEFAULT);
 export const PKG_NAME = 'claude-detective';
 const SESSION_DEFAULT = `${tmpdir()}/claude-detective-live.json`;
 
@@ -1185,7 +1189,7 @@ const USAGE = `usage:
 async function ctlBase(args) {
   const port = argFlag(args, 'port');
   if (port) return `http://127.0.0.1:${port}`;
-  const sp = argFlag(args, 'session') || SESSION_DEFAULT;
+  const sp = sessionPathFor(args);
   const s = JSON.parse(readFileSync(sp, 'utf8'));
   return `http://127.0.0.1:${s.port}`;
 }
@@ -1232,7 +1236,7 @@ async function runControl(cmd, args) {
 }
 
 async function runLiveServer(args) {
-  const sp = argFlag(args, 'session') || SESSION_DEFAULT;
+  const sp = sessionPathFor(args);
   const transcript = await serveLive({
     port: Number(argFlag(args, 'port') || 8788),
     onListen: (url, actualPort) => {
@@ -1256,7 +1260,7 @@ async function runLiveServer(args) {
 // rework a single question in place with `update` and keep the user's progress.
 // Run this in the background and drive it with the control sub-commands.
 async function runInterview(rawJson, args) {
-  const sp = argFlag(args, 'session') || SESSION_DEFAULT;
+  const sp = sessionPathFor(args);
   const outPath = argFlag(args, 'out');
   // Hard-block a second interview on the default session — it would clobber the
   // session file and orphan the first server. --force / --port / --session opt out.
