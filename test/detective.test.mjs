@@ -40,6 +40,26 @@ test('a reworking batch disables its continue button', () => {
   assert.match(shell, /function refreshSubmitLock/);
 });
 
+test('requireHints demands a why and per-option hint', () => {
+  const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
+  assert.throws(() => validateQuestions(doc, { requireHints: true }), /why|hint/i);
+});
+
+test('requireHints passes when why and pro present', () => {
+  const doc = { questions: [{ id: 'q', text: 't', why: 'because', options: [{ id: 'a', label: 'A', pro: 'fast' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { requireHints: true }));
+});
+
+test('requireHints accepts a hint field as the per-option hint', () => {
+  const doc = { questions: [{ id: 'q', text: 't', why: 'because', options: [{ id: 'a', label: 'A', hint: 'note' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc, { requireHints: true }));
+});
+
+test('validateQuestions with no opts is unchanged', () => {
+  const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
+  assert.doesNotThrow(() => validateQuestions(doc));
+});
+
 test('live shell renders a relative-time updater', () => {
   const shell = renderLiveShellForTest();
   assert.match(shell, /qago/);

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 // Input handling: validate, normalize, load
 // ---------------------------------------------------------------------------
 
-export function validateQuestions(doc) {
+export function validateQuestions(doc, opts = {}) {
   if (!doc || typeof doc !== 'object') throw new Error('questions JSON must be an object');
   const hasSections = Array.isArray(doc.sections);
   const hasFlat = Array.isArray(doc.questions);
@@ -41,13 +41,27 @@ export function validateQuestions(doc) {
           if (typeof o.label !== 'string' || !o.label) throw new Error(`question ${q.id} option ${o.id} needs "label"`);
         }
       }
+      if (opts.requireHints) {
+        if (typeof q.why !== 'string' || !q.why) throw new Error(`question ${q.id} needs a "why" (requireHints)`);
+        if (q.type !== 'yesno' && Array.isArray(q.options)) {
+          for (const o of q.options) {
+            if (!o.pro && !o.hint) throw new Error(`question ${q.id} option ${o.id} needs a "pro" or "hint" (requireHints)`);
+          }
+        }
+      }
+      if (opts.forceVisual && (q.type === undefined || q.type === 'single' || q.type === 'multi')) {
+        const hasVisual = typeof q.visual === 'string' && q.visual.trim() !== '';
+        if (!hasVisual && q.visual !== false) {
+          throw new Error(`question ${q.id} needs a "visual" (forceVisual) — set visual:false only if a diagram truly adds nothing`);
+        }
+      }
     }
   }
   return doc;
 }
 
-export function normalizeQuestions(doc) {
-  validateQuestions(doc);
+export function normalizeQuestions(doc, opts = {}) {
+  validateQuestions(doc, opts);
   const rawSections = Array.isArray(doc.sections)
     ? doc.sections
     : [{ title: undefined, questions: doc.questions }];
@@ -59,11 +73,12 @@ export function normalizeQuestions(doc) {
       const rawOptions = Array.isArray(q.options) && q.options.length ? q.options : null;
       const options = isYesNo && !rawOptions
         ? [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
-        : rawOptions.map((o) => ({ id: o.id, label: o.label, pro: o.pro, con: o.con }));
+        : rawOptions.map((o) => ({ id: o.id, label: o.label, pro: o.pro, con: o.con, hint: o.hint }));
       return {
         id: q.id,
         text: q.text,
         why: typeof q.why === 'string' ? q.why : undefined,
+        visual: typeof q.visual === 'string' ? q.visual : (q.visual === false ? false : undefined),
         // `type` drives result semantics; `render` drives the layout.
         // yesno → single-select semantics; rank → its own ordered semantics.
         type: isRank ? 'rank' : q.type === 'multi' ? 'multi' : 'single',
@@ -164,13 +179,14 @@ function renderOption(q, o) {
   const recommended = q.recommendation && q.recommendation.optionId === o.id;
   const pro = o.pro ? `<div class="pro">${fmt(o.pro)}</div>` : '';
   const con = o.con ? `<div class="con">${fmt(o.con)}</div>` : '';
+  const hint = !o.pro && !o.con && o.hint ? `<div class="ohint">${fmt(o.hint)}</div>` : '';
   const star = recommended ? ' <span class="rec-star">★ recommended</span>' : '';
   return `
     <label class="option${recommended ? ' recommended' : ''}">
       <input type="${inputType}" name="q__${esc(q.id)}" data-qid="${esc(q.id)}" value="${esc(o.id)}">
       <div class="option-body">
         <div class="option-label">${esc(o.label)}${star}</div>
-        ${pro}${con}
+        ${pro}${con}${hint}
       </div>
     </label>`;
 }
@@ -304,6 +320,7 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .pro,.con{padding-left:0;font-size:var(--fs-micro);margin-top:1px}
 .pro{color:var(--grn2)}.pro::before{content:"+ ";font-weight:700}
 .con{color:var(--red)}.con::before{content:"- ";font-weight:700}
+.ohint{padding-left:0;font-size:var(--fs-micro);margin-top:1px;color:var(--tx4)}
 
 /* drag-to-rank */
 .rank{list-style:none;counter-reset:rk;margin:2px 0 0;padding-left:0;display:flex;flex-direction:column;gap:2px}
@@ -894,7 +911,7 @@ export function serveLive(opts = {}) {
       if (req.method === 'POST' && p === '/ctl/push') {
         readBody(req).then((body) => {
           let doc;
-          try { doc = normalizeQuestions(JSON.parse(body)); } catch (e) { json(400, { error: String(e && e.message || e) }); return; }
+          try { doc = normalizeQuestions(JSON.parse(body), state.config); } catch (e) { json(400, { error: String(e && e.message || e) }); return; }
           const id = state.batches.length;
           const html = renderBatchHtml(doc, id);
           const qids = [];
