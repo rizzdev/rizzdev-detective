@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🕵️ rizzdev-detective
+# 🕵️ claude-detective
 
 ### Stop answering AI questions one at a time.
 
@@ -36,7 +36,7 @@
 
 When Claude needs a bunch of decisions from you — auth model, data shape, which features to cut — it usually drips them out **one question per message**. That's slow, and you can't see the whole picture at once.
 
-`rizzdev-detective` flips it: Claude writes the *entire* question set, spins up a tiny local web page, and you triage everything in one pass — **radio buttons, checkboxes, yes/no pills, "other" boxes** — with the trade‑offs of each option laid out in front of you. Hit **Submit** and the answers land back in Claude as clean JSON.
+`claude-detective` flips it: Claude writes the *entire* question set, spins up a tiny local web page, and you triage everything in one pass — **radio buttons, checkboxes, yes/no pills, "other" boxes** — with the trade‑offs of each option laid out in front of you. Hit **Submit** and the answers land back in Claude as clean JSON.
 
 No account, no cloud, no dependencies. One file of Node, localhost only.
 
@@ -84,7 +84,9 @@ cd rizzdev-detective
 .\install.ps1
 ```
 
-The install script symlinks this folder into `~/.claude/skills/rizzdev-detective`, so a `git pull` keeps it current on every machine. Restart Claude Code (or run `/reload-skills`) and you're set.
+The install script symlinks this folder into `~/.claude/skills/claude-detective`, so a `git pull` keeps it current on every machine. Restart Claude Code (or run `/reload-skills`) and you're set.
+
+> Renamed from `rizzdev-detective`; `/rizzdev-detective` still works as a deprecated alias. The GitHub repo / `npx` path rename is a pending follow-up, so clone and demo URLs below still reference the old name.
 
 > Override the destination with the `CLAUDE_SKILLS_DIR` env var.
 
@@ -93,12 +95,12 @@ The install script symlinks this folder into `~/.claude/skills/rizzdev-detective
 Just ask Claude for a lot of questions, or run the command:
 
 ```
-/rizzdev-detective
+/claude-detective
 ```
 
 Claude will author the questions, open the form in your browser, and wait. You answer, submit, and it continues with your choices. That's the whole loop.
 
-**When it kicks in:** you ask for "a lot of questions", a questionnaire, or a survey — or run `/rizzdev-detective`.
+**When it kicks in:** you ask for "a lot of questions", a questionnaire, or a survey — or run `/claude-detective`.
 **When it won't:** a single quick question (Claude just asks in chat).
 
 ## 🧩 Authoring questions (the schema)

@@ -1,9 +1,9 @@
 ---
-name: rizzdev-detective
-description: Use when the user asks for a lot of questions at once, a questionnaire, a survey, or runs /rizzdev-detective. Serves Claude-authored multiple-choice questions (with per-option pros/cons and a per-question recommendation) in a polished local web page, blocks until the user submits, and returns their answers as structured JSON.
+name: claude-detective
+description: Use when the user asks for a lot of questions at once, a questionnaire, a survey, or runs /claude-detective. Serves Claude-authored multiple-choice questions (with per-option pros/cons and a per-question recommendation) in a polished local web page, blocks until the user submits, and returns their answers as structured JSON.
 ---
 
-# rizzdev-detective
+# claude-detective
 
 ## Overview
 
@@ -16,7 +16,7 @@ tradeoffs visible.
 ## When to Use
 
 - The user asks for "a lot of questions", a questionnaire, a survey, or "ask me everything at once".
-- The user runs `/rizzdev-detective`.
+- The user runs `/claude-detective`.
 - You have many decisions to resolve and want them triaged in one pass.
 
 **When NOT to use:** a single quick question (just ask in chat), or open-ended
@@ -39,7 +39,7 @@ Depth is additive:
   art, comparisons).
 - **`--deep --online`:** double down on both.
 
-Recognize the flags from the `/rizzdev-detective` args and from natural phrasing
+Recognize the flags from the `/claude-detective` args and from natural phrasing
 ("go deep", "research this online first"). **How** you research is your call per
 task — read inline, fan out `Explore` subagents, or use the `deep-research` /
 Firecrawl skills — pick what fits the scope. Tell the user you're researching
@@ -103,7 +103,7 @@ Then surface what you learned in the form:
    it with the control sub-commands below.
 
    ```bash
-   node ~/.claude/skills/rizzdev-detective/detective.mjs <questions.json> --out <results.json> &
+   node ~/.claude/skills/claude-detective/detective.mjs <questions.json> --out <results.json> &
    ```
 
    (There's a legacy static one-page form behind `--static` if you ever want a
@@ -160,7 +160,7 @@ Respond by writing a small update file and running `update`:
 ```
 
 ```bash
-node ~/.claude/skills/rizzdev-detective/detective.mjs update <update.json>
+node ~/.claude/skills/claude-detective/detective.mjs update <update.json>
 ```
 
 The `question` uses the same schema as any question; its `id` is forced to `qid`
@@ -205,3 +205,7 @@ Unanswered questions come back with empty `selected`.
   they never reload the page or discard the user's other answers. Reserve
   `retract` for genuinely stale downstream batches after a changed answer.
 - If the browser doesn't auto-open, share the printed URL with the user.
+
+> Renamed from `rizzdev-detective`. The old `/rizzdev-detective` command still works
+> as a deprecated alias (symlink the old skill dir to this one); it will be removed
+> in a future release.

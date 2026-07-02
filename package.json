@@ -1,10 +1,10 @@
 {
-  "name": "rizzdev-detective",
-  "version": "1.0.0",
+  "name": "claude-detective",
+  "version": "1.1.0",
   "description": "Ask a human a whole batch of multiple-choice questions in a slick local web form and get structured answers back — a Claude Code skill (and standalone CLI).",
   "type": "module",
   "bin": {
-    "rizzdev-detective": "detective.mjs"
+    "claude-detective": "detective.mjs"
   },
   "exports": "./detective.mjs",
   "files": [
@@ -29,11 +29,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rizzdev/rizzdev-detective.git"
+    "url": "git+https://github.com/rizzdev/claude-detective.git"
   },
-  "homepage": "https://github.com/rizzdev/rizzdev-detective#readme",
+  "homepage": "https://github.com/rizzdev/claude-detective#readme",
   "bugs": {
-    "url": "https://github.com/rizzdev/rizzdev-detective/issues"
+    "url": "https://github.com/rizzdev/claude-detective/issues"
   },
   "author": "rizzdev",
   "license": "MIT"

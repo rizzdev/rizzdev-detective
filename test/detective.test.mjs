@@ -10,7 +10,12 @@ import {
   replaceQuestionHtml,
   normalizeResults,
   DEMO_QUESTIONS,
+  PKG_NAME,
 } from '../detective.mjs';
+
+test('package identity is claude-detective', () => {
+  assert.equal(PKG_NAME, 'claude-detective');
+});
 
 test('the built-in --demo questions are valid and render', () => {
   const n = normalizeQuestions(DEMO_QUESTIONS);

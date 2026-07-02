@@ -453,7 +453,7 @@ const NAV_JS = `
 })();`;
 
 export function renderPage(questions) {
-  const title = questions.title ? esc(questions.title) : 'rizzdev-detective';
+  const title = questions.title ? esc(questions.title) : 'claude-detective';
   const cols = sectionColors(questions.sections.length);
   const body = renderFindings(questions.findings) + questions.sections.map((s, i) => renderSection(s, cols[i])).join('');
   const dataIsland = JSON.stringify(questions).replace(/</g, '\\u003c');
@@ -464,7 +464,7 @@ export function renderPage(questions) {
 <style>${STYLES}</style></head>
 <body>
 <div class="wrap">
-  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">rizzdev@detective: ./detective</span></div>
+  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective</span></div>
   <div class="screen">
     <h1>${title}</h1>
     ${body}
@@ -542,11 +542,11 @@ function renderLiveShell() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rizzdev-detective — live</title>
+<title>claude-detective — live</title>
 <style>${STYLES}</style></head>
 <body>
 <div class="wrap">
-  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">rizzdev@detective: ./detective --live</span></div>
+  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective --live</span></div>
   <div class="screen">
     <div id="feed"></div>
     <div class="statusline" id="status"><span class="dotp"></span><span id="stext">connecting…</span></div>
@@ -928,7 +928,8 @@ function openBrowser(url) {
 }
 
 const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : null; };
-const SESSION_DEFAULT = `${tmpdir()}/rizzdev-detective-live.json`;
+export const PKG_NAME = 'claude-detective';
+const SESSION_DEFAULT = `${tmpdir()}/claude-detective-live.json`;
 
 const USAGE = `usage:
   detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit)
@@ -993,7 +994,7 @@ async function runLiveServer(args) {
     port: Number(argFlag(args, 'port') || 8788),
     onListen: (url, actualPort) => {
       try { writeFileSync(sp, JSON.stringify({ port: actualPort, url, pid: process.pid })); } catch {}
-      console.error(`\nrizzdev-detective live → ${url}`);
+      console.error(`\nclaude-detective live → ${url}`);
       console.error('drive it:  push <batch.json>  ·  wait  ·  finish\n');
       openBrowser(url);
     },
@@ -1020,7 +1021,7 @@ async function runInterview(rawJson, args) {
     onListen: (url, port) => {
       base = `http://127.0.0.1:${port}`;
       try { writeFileSync(sp, JSON.stringify({ port, url, pid: process.pid })); } catch {}
-      console.error(`\nrizzdev-detective ready → ${url}`);
+      console.error(`\nclaude-detective ready → ${url}`);
       console.error('drive it:  wait  ·  update <file>  ·  push <file>  ·  finish\n');
       openBrowser(url);
     },
@@ -1164,7 +1165,7 @@ async function runOneShot(args) {
   }
   const results = await serve(questions, {
     onListen: (url) => {
-      console.error(`\nrizzdev-detective ready → ${url}`);
+      console.error(`\nclaude-detective ready → ${url}`);
       console.error('Waiting for you to submit your answers…\n');
       openBrowser(url);
     },
