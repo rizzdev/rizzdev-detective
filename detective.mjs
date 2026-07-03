@@ -43,19 +43,22 @@ export function validateQuestions(doc, opts = {}) {
       }
       if (opts.requireHints) {
         if (typeof q.why !== 'string' || !q.why) throw new Error(`question ${q.id} needs a "why" (requireHints)`);
+        // Impact is Claude's per-decision weight — required, and the signal that
+        // orders which questions surface first in loop mode.
+        if (!Number.isInteger(q.impact) || q.impact < 1 || q.impact > 5) {
+          throw new Error(`question ${q.id} needs an integer "impact" 1–5 (requireHints)`);
+        }
         if (q.type !== 'yesno' && Array.isArray(q.options)) {
           for (const o of q.options) {
             if (!o.pro && !o.hint) throw new Error(`question ${q.id} option ${o.id} needs a "pro" or "hint" (requireHints)`);
           }
         }
       }
-      if (opts.forceVisual && (q.type === undefined || q.type === 'single' || q.type === 'multi')) {
-        const hasVisual = typeof q.visual === 'string' && q.visual.trim() !== '';
-        if (!hasVisual && q.visual !== false) {
-          throw new Error(`question ${q.id} needs a "visual" (forceVisual) — set visual:false only if a diagram truly adds nothing`);
-        }
-      }
     }
+  }
+  // Loop mode: each round is capped at 5 questions so batches stay snap-triageable.
+  if (opts.loop && seen.size > 5) {
+    throw new Error(`loop mode allows at most 5 questions per round (got ${seen.size})`);
   }
   return doc;
 }
@@ -78,7 +81,7 @@ export function normalizeQuestions(doc, opts = {}) {
         id: q.id,
         text: q.text,
         why: typeof q.why === 'string' ? q.why : undefined,
-        visual: typeof q.visual === 'string' ? q.visual : (q.visual === false ? false : undefined),
+        impact: Number.isInteger(q.impact) ? q.impact : undefined,
         // `type` drives result semantics; `render` drives the layout.
         // yesno → single-select semantics; rank → its own ordered semantics.
         type: isRank ? 'rank' : q.type === 'multi' ? 'multi' : 'single',
@@ -224,15 +227,15 @@ function renderQuestion(q) {
       ? renderRankItems(q)
       : `<div class="options${twoCol ? ' two-col' : ''}">${q.options.map((o) => renderOption(q, o)).join('')}</div>`;
   const recAttr = q.recommendation && q.recommendation.optionId ? ` data-rec="${esc(q.recommendation.optionId)}"` : '';
-  const visual = (typeof q.visual === 'string' && q.visual.trim())
-    ? `<div class="visual">${/^\s*<svg[\s>]/i.test(q.visual) ? q.visual : `<pre>${esc(q.visual)}</pre>`}</div>`
+  const hasImpact = Number.isInteger(q.impact);
+  const impact = hasImpact
+    ? `<span class="impact i${q.impact}" title="how much this decision matters (${q.impact}/5)">impact ${q.impact}</span>`
     : '';
   return `
-    <section class="question" data-qid="${esc(q.id)}"${recAttr}>
-      <h3>${esc(q.text)}</h3>
+    <section class="question" data-qid="${esc(q.id)}"${recAttr} data-impact="${hasImpact ? q.impact : ''}">
+      <h3>${esc(q.text)}${impact}</h3>
       ${why}
       ${rec}
-      ${visual}
       ${controls}
       ${other}
     </section>`;
@@ -272,6 +275,8 @@ body{margin:0;background:#05070b;color:var(--tx2);font:var(--fs-body)/1.4 "JetBr
 .titlebar .dot{width:11px;height:11px;border-radius:50%;box-shadow:inset 0 0 1px rgba(0,0,0,.5),inset 0 1px 1px rgba(255,255,255,.14)}
 .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
 .titlebar .tt{margin-left:8px;color:var(--tx4);font-size:var(--fs-micro)}
+.loopchip{margin-inline-start:10px;padding:1px 8px;border:1px solid var(--grn);border-radius:10px;color:var(--grn);font-size:var(--fs-micro);font-weight:700}
+.loopchip[hidden]{display:none}
 #gear{margin-inline-start:auto;background:transparent;border:0;color:var(--tx4);font-size:1rem;cursor:pointer;line-height:1}
 #gear:hover{color:var(--tx2)}
 .settings{padding:12px 16px;background:#0b0f16;border-bottom:1px solid #1a2230;display:flex;flex-direction:column;gap:8px}
@@ -334,9 +339,9 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .pro{color:var(--grn2)}.pro::before{content:"+ ";font-weight:700}
 .con{color:var(--red)}.con::before{content:"- ";font-weight:700}
 .ohint{padding-left:0;font-size:var(--fs-micro);margin-top:1px;color:var(--tx4)}
-.visual{margin:8px 0;padding:8px;border:1px solid #222a3a;border-radius:6px;overflow:auto}
-.visual pre{margin:0;white-space:pre;font-size:var(--fs-micro);color:var(--tx3)}
-.visual svg{max-width:100%;height:auto}
+/* per-question impact weight (1–5) — colored badge, also the loop-ordering signal */
+.impact{margin-left:8px;padding:1px 7px;border-radius:10px;font-size:var(--fs-micro);font-weight:700;letter-spacing:.02em;vertical-align:middle;border:1px solid currentColor;white-space:nowrap;opacity:.9}
+.impact.i1{color:var(--tx4)}.impact.i2{color:#6cb6ff}.impact.i3{color:var(--amb)}.impact.i4{color:#f97316}.impact.i5{color:var(--red)}
 
 /* drag-to-rank */
 .rank{list-style:none;counter-reset:rk;margin:2px 0 0;padding-left:0;display:flex;flex-direction:column;gap:2px}
@@ -598,10 +603,9 @@ function renderLiveShell() {
 <style>${STYLES}</style></head>
 <body>
 <div class="wrap">
-  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective --live</span><button type="button" id="gear" title="settings" onclick="toggleSettings()">⚙</button></div>
+  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective --live</span><span class="loopchip" id="loopchip" hidden>⟳ loop mode · ≤5/round</span><button type="button" id="gear" title="settings" onclick="toggleSettings()">⚙</button></div>
   <div class="settings" id="settings" hidden>
-    <label><input type="checkbox" id="cfg-requireHints"> require a hint on every question &amp; option</label>
-    <label><input type="checkbox" id="cfg-forceVisual"> force a visual/diagram per question</label>
+    <label><input type="checkbox" id="cfg-requireHints"> require a hint &amp; impact score on every question</label>
     <label><input type="checkbox" id="cfg-auditAsYouGo"> enable "audit this" (token-heavy — spawns subagents)</label>
     <div class="ctxrow"><label for="cfg-context">context (highest-priority guidance for claude)</label>
       <textarea id="cfg-context" rows="5" placeholder="e.g. always prefer the cheapest option…"></textarea></div>
@@ -739,7 +743,6 @@ async function toggleSettings(){
   try{
     var cfg=await (await fetch('/ctl/config')).json();
     document.getElementById('cfg-requireHints').checked=!!cfg.requireHints;
-    document.getElementById('cfg-forceVisual').checked=!!cfg.forceVisual;
     document.getElementById('cfg-auditAsYouGo').checked=!!cfg.auditAsYouGo;
     var ctx=await (await fetch('/ctl/context')).json();
     document.getElementById('cfg-context').value=ctx.text||'';
@@ -754,7 +757,6 @@ document.addEventListener('change',function(e){
 async function saveSettings(){
   var patch={
     requireHints:document.getElementById('cfg-requireHints').checked,
-    forceVisual:document.getElementById('cfg-forceVisual').checked,
     auditAsYouGo:document.getElementById('cfg-auditAsYouGo').checked,
   };
   try{
@@ -832,6 +834,7 @@ es.addEventListener('annotate',function(e){
   b.appendChild(msg);b.appendChild(dis);b.appendChild(ask);
   q.appendChild(b);stampUpdated(q);showToast('audit note added','');
 });
+es.addEventListener('mode',function(e){var d=JSON.parse(e.data);var c=document.getElementById('loopchip');if(c)c.hidden=!d.loop;});
 es.addEventListener('status',function(e){const d=JSON.parse(e.data);setStatus(d.kind||'',d.text||'');});
 es.addEventListener('retract',function(e){const d=JSON.parse(e.data);feed.querySelectorAll('.batch').forEach(function(el){if(Number(el.dataset.batch)>d.from)el.remove();});setStatus('think','claude is thinking…');});
 es.addEventListener('finish',function(e){es.close();const eb=document.querySelector('.endbar');if(eb)eb.remove();setStatus('done','interview complete — you can close this tab.');});
@@ -933,7 +936,9 @@ export function serveLive(opts = {}) {
   const maxTries = opts.maxTries || 20;
   let port = opts.port || 8788;
   let tries = 0;
-  const state = { clients: [], batches: [], answers: {}, globalNote: '', pending: [], waiters: [], finished: false, config: loadConfig() };
+  // `loop` is runtime-only (never persisted to the global config file): the ≤5-per-
+  // round cap and the loop chip live for the duration of this one interview.
+  const state = { clients: [], batches: [], answers: {}, globalNote: '', pending: [], waiters: [], finished: false, config: loadConfig(), loop: !!opts.loop };
 
   const sse = (res, event, data) => { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} };
   const broadcast = (event, data) => { for (const c of state.clients) sse(c, event, data); };
@@ -960,6 +965,7 @@ export function serveLive(opts = {}) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         res.write(': ok\n\n');
         state.clients.push(res);
+        sse(res, 'mode', { loop: state.loop });
         for (const b of state.batches) sse(res, 'batch', { id: b.id, html: b.html }); // catch a late/reloaded tab up
         if (state.finished) sse(res, 'finish', {});
         else if (state.batches.length) sse(res, 'status', { kind: '', text: 'your move' });
@@ -1003,7 +1009,7 @@ export function serveLive(opts = {}) {
       if (req.method === 'POST' && p === '/ctl/push') {
         readBody(req).then((body) => {
           let doc;
-          try { doc = normalizeQuestions(JSON.parse(body), state.config); } catch (e) { json(400, { error: String(e && e.message || e) }); return; }
+          try { doc = normalizeQuestions(JSON.parse(body), { ...state.config, loop: state.loop }); } catch (e) { json(400, { error: String(e && e.message || e) }); return; }
           const id = state.batches.length;
           const html = renderBatchHtml(doc, id);
           const qids = [];
@@ -1070,7 +1076,7 @@ export function serveLive(opts = {}) {
         return;
       }
       if (req.method === 'GET' && p === '/ctl/state') {
-        json(200, { answers: state.answers, globalNote: state.globalNote, batches: state.batches.length, finished: state.finished, config: state.config }); return;
+        json(200, { answers: state.answers, globalNote: state.globalNote, batches: state.batches.length, finished: state.finished, config: state.config, loop: state.loop }); return;
       }
       if (req.method === 'POST' && p === '/config') {
         readBody(req).then((body) => {
@@ -1127,15 +1133,21 @@ function openBrowser(url) {
 }
 
 const argFlag = (args, name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : null; };
-// Where to write the session file: an explicit --session wins; else a port-keyed
-// file for intentional parallel (--port) sessions; else the single default.
-const sessionPathFor = (args) => argFlag(args, 'session')
-  || (argFlag(args, 'port') ? `${tmpdir()}/claude-detective-live.${argFlag(args, 'port')}.json` : SESSION_DEFAULT);
+// Where to write the session file. --session <chat-id> keys the file to a chat
+// (the binding that makes "one interview per chat" enforceable — sanitized into
+// the filename, never used as a raw path); else a port-keyed file for intentional
+// parallel (--port) sessions; else the single default.
+const sessionPathFor = (args) => {
+  const sid = argFlag(args, 'session');
+  if (sid) return `${tmpdir()}/claude-detective-live.${String(sid).replace(/[^\w.-]/g, '_')}.json`;
+  const port = argFlag(args, 'port');
+  return port ? `${tmpdir()}/claude-detective-live.${port}.json` : SESSION_DEFAULT;
+};
 export const PKG_NAME = 'claude-detective';
 const SESSION_DEFAULT = `${tmpdir()}/claude-detective-live.json`;
 
 // Global config + context live under the skills dir (no per-project config).
-const CONFIG_DEFAULTS = { requireHints: true, forceVisual: false, auditAsYouGo: false };
+const CONFIG_DEFAULTS = { requireHints: true, auditAsYouGo: false };
 export function configPath() {
   const base = process.env.CLAUDE_SKILLS_DIR || `${process.env.HOME}/.claude/skills`;
   return `${base}/claude-detective/config.json`;
@@ -1174,6 +1186,7 @@ export async function isSessionLive(sessionPath) {
 
 const USAGE = `usage:
   detective.mjs <questions.json> [--out <results.json>]   ask a batch (live UI, blocks until submit; --force to replace a live one)
+  detective.mjs <questions.json> --loop --session <id>    loop mode: ≤5 questions/round, bound to a chat id (one interview per chat)
   detective.mjs --demo                                    open a built-in sample interview
   detective.mjs <questions.json> --once                   standalone: self-finish on submit (no agent driving)
   detective.mjs --static <questions.json>                 legacy static one-page form (fallback)
@@ -1237,10 +1250,12 @@ async function runControl(cmd, args) {
 
 async function runLiveServer(args) {
   const sp = sessionPathFor(args);
+  const loop = args.includes('--loop');
   const transcript = await serveLive({
+    loop,
     port: Number(argFlag(args, 'port') || 8788),
     onListen: (url, actualPort) => {
-      try { writeFileSync(sp, JSON.stringify({ port: actualPort, url, pid: process.pid })); } catch {}
+      try { writeFileSync(sp, JSON.stringify({ port: actualPort, url, pid: process.pid, loop })); } catch {}
       console.error(`\nclaude-detective live → ${url}`);
       console.error('drive it:  push <batch.json>  ·  wait  ·  finish\n');
       openBrowser(url);
@@ -1262,22 +1277,25 @@ async function runLiveServer(args) {
 async function runInterview(rawJson, args) {
   const sp = sessionPathFor(args);
   const outPath = argFlag(args, 'out');
-  // Hard-block a second interview on the default session — it would clobber the
-  // session file and orphan the first server. --force / --port / --session opt out.
-  if (!args.includes('--force') && !argFlag(args, 'port') && !argFlag(args, 'session')) {
+  const loop = args.includes('--loop');
+  // One interview per chat: hard-block a second while one is live on the SAME
+  // session key (default or --session <chat-id>). It would clobber the session
+  // file and orphan the first server. --port (explicit parallel) / --force opt out.
+  if (!args.includes('--force') && !argFlag(args, 'port')) {
     const cur = await isSessionLive(sp);
     if (cur.live) {
-      console.error(`error: an interview is already live at ${cur.url} — finish it, or pass --force`);
+      console.error(`error: an interview is already live for this chat at ${cur.url} — append to it (push), finish it, or pass --force`);
       process.exit(1);
     }
   }
   let base = null;
   const done = serveLive({
+    loop,
     port: Number(argFlag(args, 'port') || 8788),
     onListen: (url, port) => {
       base = `http://127.0.0.1:${port}`;
-      try { writeFileSync(sp, JSON.stringify({ port, url, pid: process.pid })); } catch {}
-      console.error(`\nclaude-detective ready → ${url}`);
+      try { writeFileSync(sp, JSON.stringify({ port, url, pid: process.pid, loop })); } catch {}
+      console.error(`\nclaude-detective ready → ${url}${loop ? '  (loop mode · ≤5/round)' : ''}`);
       console.error('drive it:  wait  ·  update <file>  ·  push <file>  ·  finish\n');
       openBrowser(url);
     },
@@ -1352,7 +1370,7 @@ export const DEMO_QUESTIONS = {
     { title: 'storage & transport', questions: [
       { id: 'store', text: 'Where should uploaded files live?',
         why: 'Determines cost, egress, and how much infra you take on.',
-        type: 'single',
+        type: 'single', impact: 4,
         recommendation: { optionId: 'r2', why: 'S3-compatible with no egress fees — cheap for user files' },
         options: [
           { id: 'r2', label: 'Cloudflare R2', pro: 'no egress fees, S3-compatible', con: 'newer tooling' },
@@ -1361,7 +1379,7 @@ export const DEMO_QUESTIONS = {
         ], allowOther: true },
       { id: 'method', text: 'How do uploads reach storage?',
         why: 'The single biggest architecture call here.',
-        type: 'single',
+        type: 'single', impact: 5,
         recommendation: { optionId: 'presign', why: 'keeps large files off your server — cheaper and scalable' },
         options: [
           { id: 'presign', label: 'Presigned direct-to-storage', pro: 'files skip your server; scales', con: 'more moving parts' },
@@ -1369,7 +1387,7 @@ export const DEMO_QUESTIONS = {
         ] },
     ] },
     { title: 'handling & safety', questions: [
-      { id: 'images', text: 'How should images be processed?', type: 'single',
+      { id: 'images', text: 'How should images be processed?', type: 'single', impact: 3,
         why: 'Image handling drives payload size, read latency, and how much pipeline you maintain.',
         recommendation: { optionId: 'ondemand', why: 'store one original, transform via CDN on request' },
         options: [
@@ -1377,15 +1395,15 @@ export const DEMO_QUESTIONS = {
           { id: 'onupload', label: 'Resize on upload', pro: 'fast reads', con: 'reprocess to add sizes' },
           { id: 'asis', label: 'Store as-is', pro: 'no pipeline', con: 'heavy payloads to clients' },
         ] },
-      { id: 'limits', text: 'Enforce a max size + type allowlist?', type: 'yesno',
+      { id: 'limits', text: 'Enforce a max size + type allowlist?', type: 'yesno', impact: 5,
         why: 'Without a ceiling, one request can exhaust disk, memory, or your bill.',
         recommendation: { optionId: 'yes', why: 'first line of defense against abuse' } },
-      { id: 'scan', text: 'Scan uploads for malware?', type: 'yesno',
+      { id: 'scan', text: 'Scan uploads for malware?', type: 'yesno', impact: 4,
         why: "Uploads are attacker-controlled bytes you'll serve back to other users.",
         recommendation: { optionId: 'yes', why: "it's user-supplied content served to others" } },
     ] },
     { title: 'scope & rollout', questions: [
-      { id: 'extras', text: 'Include which of these in v1? (pick any)', type: 'multi',
+      { id: 'extras', text: 'Include which of these in v1? (pick any)', type: 'multi', impact: 2,
         why: 'Each is nice-to-have but adds surface area — pick what earns its keep in v1.',
         options: [
           { id: 'progress', label: 'Upload progress UI', pro: 'clear feedback on big files', con: 'needs upload events wired up' },
@@ -1395,7 +1413,7 @@ export const DEMO_QUESTIONS = {
           { id: 'thumbs', label: 'Thumbnails', pro: 'fast grids and previews', con: 'a generation + storage step' },
           { id: 'cleanup', label: 'Orphan-file cleanup job', pro: 'reclaims abandoned bytes', con: 'a scheduled job to own' },
         ] },
-      { id: 'priorities', text: 'Rank the implementation steps by priority (drag)', type: 'rank', priority: true,
+      { id: 'priorities', text: 'Rank the implementation steps by priority (drag)', type: 'rank', priority: true, impact: 3,
         why: 'Order the build so each step unblocks the next and value ships early.',
         options: [
           { id: 'presign', label: 'Presign endpoint', pro: 'unblocks everything else' },

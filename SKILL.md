@@ -68,6 +68,7 @@ Then surface what you learned in the form:
        "questions": [{
          "id": "auth",
          "text": "Which auth model for v1?",
+         "impact": 5,
          "why": "Determines how much of week 1 goes to plumbing vs features.",
          "type": "single",
          "recommendation": { "optionId": "token", "why": "Fastest path to a working v1." },
@@ -82,7 +83,9 @@ Then surface what you learned in the form:
    ```
 
    - Top level: `title?` plus either `sections` or a flat `questions` array.
-   - Question: `id` (unique), `text`, `why?`, `type` (`single` | `multi` | `yesno`, default `single`),
+   - Question: `id` (unique), `text`, **`impact` (integer 1–5, required)** — how much this
+     decision matters; it's the signal that orders which questions surface first in loop mode —
+     `why?`, `type` (`single` | `multi` | `yesno`, default `single`),
      `recommendation?` (`{optionId?, why?}`), `options` (`{id, label, pro?, con?}`), `allowOther?`.
    - **`type: "yesno"`** — shorthand for a yes/no question. `options` are optional
      (auto-generated as Yes/No; override them for custom two-choice labels like
@@ -103,8 +106,16 @@ Then surface what you learned in the form:
    it with the control sub-commands below.
 
    ```bash
-   node ~/.claude/skills/claude-detective/detective.mjs <questions.json> --out <results.json> &
+   node ~/.claude/skills/claude-detective/detective.mjs <questions.json> --out <results.json> \
+     --session <chat-id> [--loop] &
    ```
+
+   - **`--session <chat-id>` — one interview per chat.** Pass a stable id for this
+     conversation (derive it from your scratchpad path — the session UUID in
+     `…/<uuid>/scratchpad`). It binds the interview to the chat: a second launch
+     while one is still live is **hard-blocked** (append to the live one with `push`
+     instead). After you `finish`, a fresh interview may start. Always pass it.
+   - **`--loop` — loop mode** (see below). Optional.
 
    (There's a legacy static one-page form behind `--static` if you ever want a
    plain non-interactive form with no live actions.)
@@ -142,6 +153,26 @@ Then surface what you learned in the form:
 4. **The loop:** (background) wait → react (`update` a question / `push` a batch /
    `retract`) → wait → … → `finish`. Tell the user you're researching/thinking
    between reactions.
+
+   **Every control command takes the same `--session <chat-id>`** (or `--port`) so it
+   targets this chat's server: `wait --session <chat-id>`, `push <file> --session <chat-id>`, etc.
+
+## Loop mode (`--loop`)
+
+Loop mode makes the interview **self-driving**: after each submit you don't wait for a
+nudge in chat — you immediately think on their answers and `push` the next round, then
+`wait` again, repeating until the decision space is **converged** (no meaningful open
+decisions left) or the user ends it. Two rules:
+
+- **≤5 questions per round.** Each `push` is hard-capped at 5 questions (a >5 batch is
+  rejected). Keep rounds tight and triageable.
+- **Impact orders the rounds.** Lead each round with the **highest-`impact` open
+  decisions**; defer low-impact ones to later rounds (or drop them if they stop
+  mattering). Impact is your ranking signal, not just a badge.
+
+The page shows a "⟳ loop mode · ≤5/round" chip so the user knows it's self-driving.
+Between rounds, tell the user you're thinking. Converge deliberately — stop pushing when
+only trivial (impact 1–2) decisions remain, then `finish`.
 
 ## Live actions — reworking ONE question in place
 
@@ -209,13 +240,12 @@ follow-up question about that concern.
 
 ## Authoring rules (standing)
 
-- **Always write both hints.** Every question needs a `why`; every option needs a
-  `pro` (or a `hint`). Enforced when `requireHints` is on (the default).
+- **Always write hints + an impact score.** Every question needs a `why` and an
+  integer `impact` 1–5; every option needs a `pro` (or a `hint`). Enforced when
+  `requireHints` is on (the default). Score impact honestly — it drives loop-mode ordering.
 - **Prioritize "Other / add nuance."** Whenever an answer's `other` is non-empty
   (a string for single/yesno, a `string[]` for multi), do a quick think/review cycle
   on it before continuing — it often carries the real signal.
-- **`forceVisual`:** when on, author a compact inline-SVG or ASCII `visual` per
-  single/multi question; set `visual:false` only when a diagram truly adds nothing.
 - **Read `context.md` first.** Treat
   `~/.claude/skills/claude-detective/context.md` as highest-priority guidance,
   above your own defaults.
@@ -241,9 +271,10 @@ they hit "you decide". Unanswered questions come back with empty `selected`.
 ## Notes
 
 - Zero dependencies; needs Node 22+. Localhost only.
-- One run = one persistent interview session; `finish` ends it and shuts down the
-  server. The control commands find that session automatically (via a session
-  file), or pass `--port N` to target a specific one.
+- One run = one persistent interview session, and **one live interview per chat**
+  (`--session <chat-id>` binds it; a second launch while one is live is blocked).
+  `finish` ends it and shuts down the server. Control commands find the session via
+  the chat-keyed session file — pass the same `--session <chat-id>` (or `--port N`).
 - Live actions (`rethink`/`research`/`more`) rework a single question in place —
   they never reload the page or discard the user's other answers. Reserve
   `retract` for genuinely stale downstream batches after a changed answer.

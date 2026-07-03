@@ -45,39 +45,41 @@ test('requireHints demands a why and per-option hint', () => {
   assert.throws(() => validateQuestions(doc, { requireHints: true }), /why|hint/i);
 });
 
-test('requireHints passes when why and pro present', () => {
-  const doc = { questions: [{ id: 'q', text: 't', why: 'because', options: [{ id: 'a', label: 'A', pro: 'fast' }] }] };
+test('requireHints passes when why, impact and pro present', () => {
+  const doc = { questions: [{ id: 'q', text: 't', why: 'because', impact: 3, options: [{ id: 'a', label: 'A', pro: 'fast' }] }] };
   assert.doesNotThrow(() => validateQuestions(doc, { requireHints: true }));
 });
 
 test('requireHints accepts a hint field as the per-option hint', () => {
-  const doc = { questions: [{ id: 'q', text: 't', why: 'because', options: [{ id: 'a', label: 'A', hint: 'note' }] }] };
+  const doc = { questions: [{ id: 'q', text: 't', why: 'because', impact: 2, options: [{ id: 'a', label: 'A', hint: 'note' }] }] };
   assert.doesNotThrow(() => validateQuestions(doc, { requireHints: true }));
 });
 
-test('validateQuestions with no opts is unchanged', () => {
+test('validateQuestions with no opts is unchanged (impact not required)', () => {
   const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
   assert.doesNotThrow(() => validateQuestions(doc));
 });
 
-test('forceVisual requires a visual on single/multi', () => {
-  const doc = { questions: [{ id: 'q', text: 't', options: [{ id: 'a', label: 'A' }] }] };
-  assert.throws(() => validateQuestions(doc, { forceVisual: true }), /visual/i);
+test('requireHints demands an integer impact 1-5', () => {
+  const noImpact = { questions: [{ id: 'q', text: 't', why: 'because', options: [{ id: 'a', label: 'A', pro: 'fast' }] }] };
+  assert.throws(() => validateQuestions(noImpact, { requireHints: true }), /impact/i);
+  const badImpact = { questions: [{ id: 'q', text: 't', why: 'because', impact: 9, options: [{ id: 'a', label: 'A', pro: 'fast' }] }] };
+  assert.throws(() => validateQuestions(badImpact, { requireHints: true }), /impact/i);
 });
 
-test('forceVisual accepts an explicit visual:false opt-out', () => {
-  const doc = { questions: [{ id: 'q', text: 't', visual: false, options: [{ id: 'a', label: 'A' }] }] };
-  assert.doesNotThrow(() => validateQuestions(doc, { forceVisual: true }));
+test('loop mode caps a round at 5 questions', () => {
+  const five = { questions: Array.from({ length: 5 }, (_, i) => ({ id: `q${i}`, text: 't', options: [{ id: 'a', label: 'A' }] })) };
+  assert.doesNotThrow(() => validateQuestions(five, { loop: true }));
+  const six = { questions: Array.from({ length: 6 }, (_, i) => ({ id: `q${i}`, text: 't', options: [{ id: 'a', label: 'A' }] })) };
+  assert.throws(() => validateQuestions(six, { loop: true }), /5 questions per round/);
 });
 
-test('forceVisual exempts yesno', () => {
-  const doc = { questions: [{ id: 'q', text: 't', type: 'yesno' }] };
-  assert.doesNotThrow(() => validateQuestions(doc, { forceVisual: true }));
-});
-
-test('renderQuestion shows a visual block', () => {
-  const n = normalizeQuestions({ questions: [{ id: 'q', text: 't', visual: '<svg width="1"></svg>', options: [{ id: 'a', label: 'A' }] }] });
-  assert.match(renderQuestionHtml(n.sections[0].questions[0], 'q'), /class="visual"/);
+test('normalizeQuestions carries impact and renderQuestion shows an impact badge', () => {
+  const n = normalizeQuestions({ questions: [{ id: 'q', text: 't', impact: 4, options: [{ id: 'a', label: 'A' }] }] });
+  assert.equal(n.sections[0].questions[0].impact, 4);
+  const html = renderQuestionHtml(n.sections[0].questions[0], 'q');
+  assert.match(html, /class="impact i4"/);
+  assert.match(html, /data-impact="4"/);
 });
 
 test('live shell renders a relative-time updater', () => {
