@@ -203,8 +203,8 @@ function renderPill(q, o) {
 
 function renderRankItems(q) {
   const cls = q.priority ? 'rank rank-prio' : 'rank';
-  return `<ol class="${cls}" data-qid="${esc(q.id)}">${q.options.map((o) =>
-    `<li class="rankrow" draggable="true" data-oid="${esc(o.id)}"><span class="grip">⠿</span><span class="rlabel">${esc(o.label)}</span>${o.pro ? `<span class="rpro">${fmt(o.pro)}</span>` : ''}</li>`,
+  return `<ol class="${cls}" role="list" aria-label="ranking — drag, or focus a row and press space then j/k to move" data-qid="${esc(q.id)}">${q.options.map((o) =>
+    `<li class="rankrow" draggable="true" tabindex="0" role="listitem" aria-label="${esc(o.label)} — press space to grab, then j or k to move" data-oid="${esc(o.id)}"><span class="grip">⠿</span><span class="rlabel">${esc(o.label)}</span>${o.pro ? `<span class="rpro">${fmt(o.pro)}</span>` : ''}</li>`,
   ).join('')}</ol>`;
 }
 
@@ -259,9 +259,10 @@ function renderSection(sec, color) {
 const STYLES = `
 :root{color-scheme:dark;
 --fs-h1:16px;--fs-h3:15px;--fs-body:13px;--fs-meta:12.5px;--fs-micro:11.5px;
---tx1:#c6cedb;--tx2:#a7b0c0;--tx3:#828da0;--tx4:#5b6577;--tx5:#3d4757;
+--tx1:#c6cedb;--tx2:#a7b0c0;--tx3:#828da0;--tx4:#7c8699;--tx5:#5b6577;
 --grn:#7ee787;--grn2:#8fd694;--blu:#6cb6ff;--amb:#e2b86b;--red:#e58f8f;
---panel:#26324a;--line:#141b29;--indent:18px}
+--panel:#26324a;--line:#141b29;--indent:18px;
+--sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 *{box-sizing:border-box}
 ::selection{background:#2d4b6e;color:#fff}
 body{margin:0;background:#05070b;color:var(--tx2);font:var(--fs-body)/1.4 "JetBrains Mono","Fira Code","SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;-webkit-font-smoothing:antialiased;padding:26px 16px 40px}
@@ -302,7 +303,7 @@ h1::before{content:"» ";color:var(--tx4)}
 /* research briefing panel (blue, to distinguish from question panels) */
 .findings{position:relative;border:1px solid #24344e;padding:16px 14px 14px;margin:18px 0 0;background:rgba(108,182,255,.03)}
 .findings h3{position:absolute;top:-8px;left:12px;margin:0;padding:0 7px;background:#0b0e14;color:var(--blu);font-size:var(--fs-micro);letter-spacing:.14em;text-transform:lowercase;font-weight:700}
-.findings-body{color:var(--tx2);font-size:var(--fs-meta);white-space:pre-wrap}
+.findings-body{color:var(--tx2);font-family:var(--sans);font-size:var(--fs-meta);line-height:1.55;white-space:pre-wrap}
 .findings .sources{margin:9px 0 0;padding:0;list-style:none}
 .findings .sources li{color:var(--tx4);font-size:var(--fs-micro);margin:2px 0}
 .findings .sources li::before{content:"- ";color:var(--blu)}
@@ -314,10 +315,10 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .question + .question{margin-top:13px;padding-top:13px;border-top:1px solid var(--line)}
 .question h3{margin:0 0 6px;font-size:var(--fs-h3);color:var(--tx1);font-weight:700;line-height:1.35}
 .question h3::before{content:"? ";color:var(--tx4)}
-.why{margin:0 0 6px;padding-left:var(--indent);color:var(--tx3);font-size:var(--fs-meta)}
+.why{margin:0 0 6px;padding-left:var(--indent);color:var(--tx3);font-family:var(--sans);font-size:var(--fs-meta)}
 .why-tag{color:var(--amb);font-weight:700;text-transform:lowercase}
 .why-tag::after{content:":"}
-.rec{padding:0 0 0 var(--indent);margin:0 0 8px;color:var(--grn2);font-size:var(--fs-meta)}
+.rec{padding:0 0 0 var(--indent);margin:0 0 8px;color:var(--grn2);font-family:var(--sans);font-size:var(--fs-meta)}
 .rec::before{content:"» rec: ";color:var(--grn);font-weight:700}
 
 .options{display:flex;flex-direction:column;gap:2px;padding-left:0}
@@ -333,6 +334,8 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .option:hover{background:#121826;color:var(--tx1)}
 .option:hover::before{color:var(--blu)}
 .option:has(input:checked){color:var(--tx1)}
+/* visible ring for native keyboard (Tab) focus — matches the j/k .kfocus state */
+.option:has(input:focus-visible){background:#141b2b;box-shadow:inset 2px 0 0 var(--blu);color:var(--tx1)}
 .option-label{font-weight:500;color:inherit}
 .rec-star{color:var(--amb);font-weight:700;font-size:var(--fs-micro);margin-left:6px}
 .pro,.con{padding-left:0;font-size:var(--fs-micro);margin-top:1px}
@@ -340,8 +343,13 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .con{color:var(--red)}.con::before{content:"- ";font-weight:700}
 .ohint{padding-left:0;font-size:var(--fs-micro);margin-top:1px;color:var(--tx4)}
 /* per-question impact weight (1–5) — colored badge, also the loop-ordering signal */
-.impact{margin-left:8px;padding:1px 7px;border-radius:10px;font-size:var(--fs-micro);font-weight:700;letter-spacing:.02em;vertical-align:middle;border:1px solid currentColor;white-space:nowrap;opacity:.9}
-.impact.i1{color:var(--tx4)}.impact.i2{color:#6cb6ff}.impact.i3{color:var(--amb)}.impact.i4{color:#f97316}.impact.i5{color:var(--red)}
+/* impact = importance, on one amber emphasis ramp (never red — red means "con") */
+.impact{margin-inline-start:8px;padding:1px 8px;border-radius:10px;font-size:var(--fs-micro);font-weight:700;letter-spacing:.02em;vertical-align:middle;white-space:nowrap;border:1px solid transparent}
+.impact.i1{color:var(--tx3);border-color:var(--tx5)}
+.impact.i2{color:var(--tx2);border-color:var(--tx4)}
+.impact.i3{color:var(--amb);border-color:color-mix(in srgb,var(--amb) 50%,transparent)}
+.impact.i4{color:var(--amb);border-color:var(--amb);background:rgba(226,184,107,.12)}
+.impact.i5{color:#0b0e14;background:var(--amb);border-color:var(--amb)}
 
 /* drag-to-rank */
 .rank{list-style:none;counter-reset:rk;margin:2px 0 0;padding-left:0;display:flex;flex-direction:column;gap:2px}
@@ -353,6 +361,10 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .rankrow .rlabel{font-weight:500;color:var(--tx1)}
 .rankrow .rpro{color:var(--tx4);font-size:var(--fs-micro);margin-left:auto}
 .rankrow.grabbed{background:#15120a;box-shadow:inset 2px 0 0 var(--amb)}
+.rankrow:focus-visible{outline:0;box-shadow:inset 2px 0 0 var(--blu);background:#141b2b}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;padding:0;margin:-1px}
+.skip{position:absolute;left:-999px;top:8px;z-index:60;background:#0f1c13;color:var(--grn);border:1px solid #2c8f45;padding:6px 12px;font-size:var(--fs-meta)}
+.skip:focus{left:8px}
 /* priority ranking: colored severity/goodness indicator per position */
 .rank-prio .rankrow::before{color:var(--pc,var(--blu))}
 .rank-prio .rankrow .grip{color:var(--pc,var(--tx5))}
@@ -363,6 +375,7 @@ a:hover{color:#9ecbff;border-bottom-color:var(--blu)}
 .pill:has(input:checked){border-color:var(--grn);color:var(--grn);background:rgba(126,231,135,.07)}
 .pill:has(input:checked)::before{content:"‹ ";color:var(--grn)}
 .pill:has(input:checked)::after{content:" ›";color:var(--grn)}
+.pill:has(input:focus-visible){border-color:var(--blu);color:var(--tx1)}
 .pill input{position:absolute;opacity:0;pointer-events:none}
 
 .other{width:calc(100% - var(--indent));margin:6px 0 0 var(--indent);background:#080b11;border:1px solid #222a3a;color:var(--tx2);padding:5px 9px;font:inherit;font-size:var(--fs-meta)}
@@ -401,6 +414,8 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 .cont button:disabled{color:var(--tx5);border-color:#222a3a;cursor:default;background:transparent}
 .cont button:disabled:hover{color:var(--tx5);background:transparent;border-color:#222a3a}
 .cont .sent{color:var(--grn);font-weight:700;font-size:var(--fs-micro);margin-right:8px}
+.cont .pending{font-size:var(--fs-micro);color:var(--tx4);margin-inline-end:auto;align-self:center}
+.cont .pending.ok{color:var(--grn2)}
 .cont .revise{font:inherit;background:transparent;color:#7d8799;border:1px solid #2a3346;padding:3px 10px;font-size:var(--fs-micro);cursor:pointer}
 .cont .revise:hover{border-color:var(--blu);color:var(--blu)}
 .batch.spent .option,.batch.spent .pill{cursor:default}
@@ -412,7 +427,7 @@ textarea#__global{width:100%;background:#080b11;border:1px solid #222a3a;color:v
 .kfocus{background:#141b2b}
 .option.kfocus,.rankrow.kfocus{box-shadow:inset 2px 0 0 var(--blu)}
 .pill.kfocus{border-color:var(--blu)}
-.kbhint{color:var(--tx5);font-size:var(--fs-micro);margin-top:14px}
+.kbhint{color:var(--tx4);font-size:var(--fs-micro);margin-top:14px}
 .kbhint b{color:var(--blu);font-weight:700}
 #kbhelp{display:none;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);max-width:560px;background:#0d1219;border:1px solid var(--panel);padding:12px 16px;font-size:var(--fs-meta);line-height:1.7;color:var(--tx2);box-shadow:0 14px 44px rgba(0,0,0,.6);z-index:20}
 #kbhelp .kh{color:var(--grn);font-weight:700;margin-bottom:4px}
@@ -475,7 +490,8 @@ function initRank(root){
 
 // Keyboard-first navigation: focus ring over options/pills/rank rows, with
 // vim-style keys. Shared verbatim by the one-shot and live pages.
-const NAV_HTML = `<div class="kbhint"><b>j/k</b> move · <b>space</b> select · <b>1-9</b> pick · <b>o</b> other · <b>⏎</b> submit · <b>?</b> keys</div>
+const NAV_HTML = `<div id="rankstatus" class="vh" aria-live="polite"></div>
+<div class="kbhint"><b>j/k</b> move · <b>space</b> select · <b>1-9</b> pick · <b>o</b> other · <b>⏎</b> submit · <b>?</b> keys</div>
 <div id="kbhelp"><div class="kh"><b>keyboard</b></div>j / k &nbsp;or&nbsp; ↑ / ↓ — move focus<br>space — select · on a rank row: grab, then j/k to move, space to drop<br>1–9 — pick an option in the focused question<br>o — jump to the "other" box · ⏎ — submit / continue · ? — toggle · esc — cancel</div>`;
 
 const NAV_JS = `
@@ -485,7 +501,7 @@ const NAV_JS = `
   function cur(){return document.querySelector('.kfocus');}
   function setFocus(el){var c=cur();if(c)c.classList.remove('kfocus');if(el){el.classList.add('kfocus');el.scrollIntoView({block:'nearest'});}}
   function move(dir){
-    if(grabbed){var lst=grabbed.parentNode,rows=[].slice.call(lst.querySelectorAll('.rankrow')),i=rows.indexOf(grabbed),j=i+dir;if(j<0||j>=rows.length)return;if(dir>0)lst.insertBefore(grabbed,rows[j].nextSibling);else lst.insertBefore(grabbed,rows[j]);if(window.paintRank)window.paintRank(lst);grabbed.scrollIntoView({block:'nearest'});return;}
+    if(grabbed){var lst=grabbed.parentNode,rows=[].slice.call(lst.querySelectorAll('.rankrow')),i=rows.indexOf(grabbed),j=i+dir;if(j<0||j>=rows.length)return;if(dir>0)lst.insertBefore(grabbed,rows[j].nextSibling);else lst.insertBefore(grabbed,rows[j]);if(window.paintRank)window.paintRank(lst);grabbed.scrollIntoView({block:'nearest'});var rr=[].slice.call(lst.querySelectorAll('.rankrow')),st=document.getElementById('rankstatus');if(st){var lb=grabbed.querySelector('.rlabel');st.textContent=(lb?lb.textContent:'item')+' moved to position '+(rr.indexOf(grabbed)+1)+' of '+rr.length;}return;}
     var list=foci();if(!list.length)return;var i=list.indexOf(cur());var n=i<0?0:Math.min(list.length-1,Math.max(0,i+dir));setFocus(list[n]);
   }
   function activate(){var c=cur();if(!c)return;if(c.classList.contains('rankrow')){if(grabbed===c){grabbed.classList.remove('grabbed');grabbed=null;}else{grabbed=c;c.classList.add('grabbed');}return;}var inp=c.querySelector('input');if(inp)inp.click();else c.click();}
@@ -505,6 +521,9 @@ const NAV_JS = `
     else if(k==='Escape'){if(grabbed){grabbed.classList.remove('grabbed');grabbed=null;}var h=document.getElementById('kbhelp');if(h)h.style.display='none';}
     else if(/^[1-9]$/.test(k)){e.preventDefault();selectNum(parseInt(k,10));}
   });
+  // Native Tab focus on a rank row adopts it as the j/k focus, so screen-reader
+  // and Tab users get the same space-grab + j/k reordering.
+  document.addEventListener('focusin',function(e){var el=e.target&&e.target.closest&&e.target.closest('.rankrow');if(el&&el!==cur())setFocus(el);});
   window.kfocusScan=function(){if(!cur()){var f=foci();if(f.length)setFocus(f[0]);}};
   window.kfocusIn=function(scope){if(!scope)return;var f=[].slice.call(scope.querySelectorAll('.option,.pill,.rankrow'));if(f.length)setFocus(f[0]);};
 })();`;
@@ -520,9 +539,10 @@ export function renderPage(questions) {
 <title>${title}</title>
 <style>${STYLES}</style></head>
 <body>
+<a class="skip" href="#main">skip to questions</a>
 <div class="wrap">
   <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective</span></div>
-  <div class="screen">
+  <main class="screen" id="main">
     <h1>${title}</h1>
     ${body}
     <div class="global">
@@ -531,7 +551,7 @@ export function renderPage(questions) {
     </div>
     <div class="bar"><button id="submit" type="button">submit answers</button></div>
     ${NAV_HTML}
-  </div>
+  </main>
 </div>
 <script>
 const DETECTIVE = ${dataIsland};
@@ -602,6 +622,7 @@ function renderLiveShell() {
 <title>claude-detective — live</title>
 <style>${STYLES}</style></head>
 <body>
+<a class="skip" href="#main">skip to questions</a>
 <div class="wrap">
   <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="tt">claude@detective: ./detective --live</span><span class="loopchip" id="loopchip" hidden>⟳ loop mode · ≤5/round</span><button type="button" id="gear" title="settings" onclick="toggleSettings()">⚙</button></div>
   <div class="settings" id="settings" hidden>
@@ -611,12 +632,12 @@ function renderLiveShell() {
       <textarea id="cfg-context" rows="5" placeholder="e.g. always prefer the cheapest option…"></textarea></div>
     <div class="setbtns"><button type="button" onclick="saveSettings()">save settings</button><span id="setmsg"></span></div>
   </div>
-  <div class="screen">
+  <main class="screen" id="main">
     <div id="feed"></div>
     <div class="statusline" id="status"><span class="dotp"></span><span id="stext">connecting…</span></div>
     <div class="endbar"><button type="button" onclick="decideRest()">decide the rest →</button><button type="button" onclick="endInterview()">end interview</button></div>
     ${NAV_HTML}
-  </div>
+  </main>
 </div>
 <div id="toasts"></div>
 <script>
@@ -807,7 +828,31 @@ function addAudit(b){
   btn.onclick=function(){post('/signal',{batch:Number(b.dataset.batch),kind:'audit',other:batchOtherText(b)});showToast('audit requested — claude is reviewing','');setStatus('think','claude is auditing…');};
   b.appendChild(btn);
 }
-es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);addAudit(nb);setStatus('','your move');if(nb)nb.scrollIntoView({block:'start'});});
+// A gentle, non-blocking "N unanswered" on the continue bar (rank/other/you-decide all count as answered).
+function pendingCount(b){
+  var n=0;
+  [].slice.call(b.querySelectorAll('.question')).forEach(function(q){
+    if(q.querySelector('.rank'))return;
+    if(q.querySelector('input:checked'))return;
+    if(q.classList.contains('delegated'))return;
+    var o=q.querySelector('.other');
+    if((o&&o.value.trim())||q.querySelector('.ownchip'))return;
+    n++;
+  });
+  return n;
+}
+function paintPending(b){
+  if(!b||b.classList.contains('spent'))return;
+  var cont=b.querySelector('.cont');if(!cont)return;
+  var el=cont.querySelector('.pending');
+  if(!el){el=document.createElement('span');el.className='pending';cont.insertBefore(el,cont.firstChild);}
+  var n=pendingCount(b);
+  el.textContent=n?(n+' unanswered'):'all answered ✓';
+  el.className='pending'+(n?'':' ok');
+}
+feed.addEventListener('change',function(e){var b=e.target.closest&&e.target.closest('.batch');if(b)paintPending(b);});
+feed.addEventListener('input',function(e){var b=e.target.closest&&e.target.closest('.batch');if(b)paintPending(b);});
+es.addEventListener('batch',function(e){const d=JSON.parse(e.data);if(feed.querySelector('.batch[data-batch="'+d.id+'"]'))return;feed.insertAdjacentHTML('beforeend',d.html);const nb=feed.querySelector('.batch[data-batch="'+d.id+'"]');initRank(feed);addActions(nb);addAudit(nb);paintPending(nb);setStatus('','your move');if(nb)nb.scrollIntoView({block:'start'});});
 es.addEventListener('qupdate',function(e){
   const d=JSON.parse(e.data);
   const old=feed.querySelector('.question[data-qid="'+d.qid+'"]');
@@ -816,7 +861,7 @@ es.addEventListener('qupdate',function(e){
   old.insertAdjacentHTML('afterend',d.html);
   old.remove();
   const fresh=feed.querySelector('.question[data-qid="'+d.qid+'"]');
-  if(batch){initRank(batch);addActions(batch);}
+  if(batch){initRank(batch);addActions(batch);paintPending(batch);}
   if(fresh){fresh.classList.add('qflash');stampUpdated(fresh);}
   refreshSubmitLock();
   showToast('question updated ✓','good');

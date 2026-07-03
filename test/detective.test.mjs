@@ -370,8 +370,9 @@ test('validateQuestions accepts rank and still rejects unknown types', () => {
 test('renderPage renders a rank list with draggable rows', () => {
   const html = renderPage(normalizeQuestions({ questions: [{ id: 'r', text: 'order', type: 'rank',
     options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }] }));
-  assert.match(html, /class="rank" data-qid="r"/);
-  assert.match(html, /class="rankrow" draggable="true" data-oid="a"/);
+  assert.match(html, /class="rank"[^>]*data-qid="r"/);
+  assert.match(html, /class="rankrow"[^>]*draggable="true"[^>]*data-oid="a"/);
+  assert.match(html, /class="rankrow"[^>]*tabindex="0"[^>]*role="listitem"/); // keyboard/SR focusable
 });
 
 test('normalizeQuestions carries priority only on rank questions', () => {
